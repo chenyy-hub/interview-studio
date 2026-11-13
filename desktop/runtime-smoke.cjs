@@ -111,11 +111,12 @@ async function main() {
     let initializeAudio;
     const sandbox = { console: { log() {}, warn() {}, error() {} }, setTimeout: callback => { initializeAudio = callback; },
       logging_1: { ensureMacMicrophoneAccess: async () => { counts.permission++; return true; } },
-      audio_stats_1: { audioStats: { reset() {} } }, send_lag_1: { sendLag: { start() {} } } };
+      audio_stats_1: { audioStats: { reset() {} } }, send_lag_1: { sendLag: { start() {} } },
+      audio_pipeline_1: { reconfigureAudio: async () => {} } };
     const entry = vm.runInNewContext('({' + source.slice(begin, end) + '})', sandbox).startMeeting;
     const fake = { endingMeeting: null, currentMeetingId: null, setMicrophoneMuted() {}, resetBufferedTranscriptTurns() {}, broadcastMeetingState() {},
       intelligenceManager: { setMeetingMetadata() {}, startMeeting: () => null }, getWindowHelper: () => ({ getOverlayWindow: () => null, getLauncherWindow: () => null }),
-      reconfigureAudio: async () => {}, setupSystemAudioPipeline() {},
+      reconfigureAudio: async () => {}, setupSystemAudioPipeline() {}, interpreting: { reset() {} },
       systemAudioCapture: { start: () => counts.system++ }, googleSTT: { start: () => counts.systemSTT++ },
       microphoneCapture: { start: () => counts.microphone++ }, googleSTT_User: { start: () => counts.userSTT++ } };
     await entry.call(fake, { audio: { captureMicrophone: enabled } }); await initializeAudio();
