@@ -71,7 +71,7 @@ function install(appState) {
     return { model: 'connection' in use ? { model: use.model, provider: use.connection.name } : null,
       modelError: 'error' in use ? use.error : null, credentialStorage: cm.studioCredentialSession?.state() || { mode: 'memory' },
       performance: store.performance, privacy: { ...privacy.status(), selfTest: store.privacy.selfTest || null },
-      platform: process.platform, appVersion: app.getVersion?.() || '0.5.0',
+      platform: process.platform, appVersion: app.getVersion?.() || '0.6.0',
       speech: speechReadiness(cm), captureSettings: store.audio, needsConfiguration: needsConfiguration && !speechReadiness(cm).configured,
       permissions: capturePermissions(systemPreferences),
       sessionActive: !!appState.getCurrentMeetingId(), preferences: { notes: store.notes, glossary: store.glossary, autoAnswer: store.autoAnswer },
@@ -90,7 +90,7 @@ function install(appState) {
   });
   handle('privacy-test', data => {
     if (!['feishu','tencent','other'].includes(data?.client) || !['screen','window'].includes(data?.capture) || !['passed','failed'].includes(data?.result) || typeof data.version !== 'string' || !data.version.trim() || data.version.length > 80) throw new Error('请填写会议客户端、版本、共享方式和实际结果');
-    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.5.0', source: 'user-reported' };
+    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.6.0', source: 'user-reported' };
     write(); return { success: true };
   });
   handle('hide', () => { privacy.toggleVisibility(); return { success: true }; });
@@ -136,6 +136,12 @@ function install(appState) {
     const result = cm.studioCredentialSession.enableEncrypted();
     appState.processingHelper.loadStoredCredentials();
     return { success: true, ...result };
+  });
+  handle('credentials-clear', () => {
+    if (active.size || appState.getCurrentMeetingId()) throw new Error('请先停止生成并结束采音，再清除服务配置。');
+    cm.studioCredentialSession.clearLocal();
+    appState.processingHelper.loadStoredCredentials();
+    return { success: true };
   });
   handle('preferences', data => {
     if (!data || typeof data.notes !== 'string' || data.notes.length > 40000 || typeof data.glossary !== 'string' || data.glossary.length > 12000 || typeof data.autoAnswer !== 'boolean') throw new Error('背景资料最多 40,000 字符，术语表最多 12,000 字符');

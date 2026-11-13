@@ -73,3 +73,40 @@ test('Chinese connection form saves to the native registry without a model call 
   assert.match(element('#notice').textContent, /可继续使用系统默认设备/);
   assert.equal(element('#refresh-devices').disabled, false);
 });
+
+test('saved local status is visible, source confirmation precedes capture, and screenshot asking is one action', async () => {
+  const elements = new Map(), calls = [];
+  let opened = 0, closed = 0;
+  const element = selector => {
+    if (!elements.has(selector)) elements.set(selector, { value: '', innerHTML: '', children: [], insertBefore() {}, classList: { toggle() {} }, querySelectorAll: () => [], addEventListener() {}, checked: false,
+      showModal() { opened++; }, close() { closed++; } });
+    return elements.get(selector);
+  };
+  const nav = { dataset: { view: 'written' }, classList: { toggle() {} } };
+  const status = { sessionActive: false, model: { model: 'synthetic-vision-model' }, permissions: {}, transcripts: [], metrics: [], credentialStorage: { mode: 'local' }, speech: { configured: true }, captureSettings: { backend: 'sck', captureMicrophone: false, inputDeviceId: 'default', outputDeviceId: 'default' } };
+  const native = { onNativeAudioTranscript() {}, onMeetingStateChanged() {}, onSessionReset() {}, onGlobalShortcut() {} };
+  const context = { document: { querySelector: element, querySelectorAll: selector => selector === '[data-view]' ? [nav] : [] }, electronAPI: native, addEventListener() {} };
+  context.window = context;
+  Object.defineProperty(context, 'studio', { configurable: false, value: { onEvent() {}, invoke: async (name, data) => {
+    calls.push({ name, data });
+    if (name === 'status') return status;
+    if (name === 'capture') return { path: '/synthetic/screen.png', preview: 'data:image/png;base64,fixture' };
+    return { success: true };
+  } } });
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8'), context);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(element('#credential-status').textContent, /下次打开自动使用/);
+  await element('#start').onclick();
+  assert.equal(opened, 1); assert.equal(calls.some(c => c.name === 'start'), false);
+  element('#session-mic').checked = true;
+  await element('#source-start').onclick();
+  assert.equal(closed, 1);
+  assert.equal(calls.find(c => c.name === 'audio-preferences').data.captureMicrophone, true);
+  assert.equal(calls.filter(c => c.name === 'start').length, 1);
+  await nav.onclick();
+  assert.equal(element('#capture-ask').hidden, false);
+  await element('#capture-ask').onclick();
+  const ask = calls.find(c => c.name === 'ask').data;
+  assert.equal(ask.task, 'written'); assert.deepEqual([...ask.images], ['/synthetic/screen.png']);
+  assert.match(ask.question, /截图中的题目/);
+});

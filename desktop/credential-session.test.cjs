@@ -14,7 +14,7 @@ function fixture() {
   return { cm, calls, session: attach(cm) };
 }
 
-test('startup and default settings use memory with zero keychain access or disk writes', () => {
+test('legacy sessions without a persistence directory use memory with zero keychain access', () => {
   const { cm, calls, session } = fixture();
   cm.init(); cm.credentials.groqApiKey = 'synthetic-session-key'; cm.saveCredentials();
   assert.deepEqual(calls, []);

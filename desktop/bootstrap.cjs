@@ -30,7 +30,7 @@ if (launchCheck) {
   }).catch(() => app.exit(1));
 } else {
 const { CredentialsManager } = require('../dist-electron/electron/services/CredentialsManager.js');
-require('./credential-session.cjs').attach(CredentialsManager.getInstance());
+require('./credential-session.cjs').attach(CredentialsManager.getInstance(), { directory: path.join(studioData, 'private') });
 const { SettingsManager } = require('../dist-electron/electron/services/SettingsManager.js');
 // An upstream release must not replace this fork's app bundle.
 SettingsManager.getInstance().set('autoCheckUpdates', false);

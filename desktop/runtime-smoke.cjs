@@ -19,12 +19,31 @@ async function main() {
   // The pure local pairing server lives beside Electron IPC code. In headless
   // Node mode Electron is unavailable; supply only its unused top-level import.
   const Module = require('node:module'), originalLoad = Module._load;
-  let pairing;
+  let pairing, CredentialsManager;
   try {
     Module._load = function (name, ...args) { return name === 'electron' ? {} : originalLoad.call(this, name, ...args); };
     pairing = packaged('./desktop/native.cjs');
+    ({ CredentialsManager } = packaged('./dist-electron/electron/services/CredentialsManager.js'));
   } finally { Module._load = originalLoad; }
   const { createPairRoom, isPrivateIPv4 } = pairing;
+  const vaultDirectory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'studio-runtime-vault-'));
+  try {
+    const attach = packaged('./desktop/credential-session.cjs').attach;
+    const first = new CredentialsManager(); attach(first, { directory: vaultDirectory }); first.init();
+    const saved = first.saveConnection({ name: 'Synthetic provider', type: 'openai', baseUrl: 'https://example.test/v1', apiKey: 'synthetic-runtime-chat-secret' });
+    assert.ok(saved.id);
+    first.setModelUse('chat', { connectionId: saved.id, model: 'synthetic-runtime-model' });
+    first.setDeepgramApiKey('synthetic-runtime-speech-secret'); first.setSttProvider('deepgram');
+    const next = new CredentialsManager(); attach(next, { directory: vaultDirectory }); next.init();
+    assert.equal(next.resolveModelUse('chat').connection.apiKey, 'synthetic-runtime-chat-secret');
+    assert.equal(next.resolveModelUse('chat').model, 'synthetic-runtime-model');
+    assert.equal(next.getDeepgramApiKey(), 'synthetic-runtime-speech-secret');
+    assert.equal(next.getSttProvider(), 'deepgram');
+    next.studioCredentialSession.clearLocal();
+    const cleared = new CredentialsManager(); attach(cleared, { directory: vaultDirectory }); cleared.init();
+    assert.ok(cleared.resolveModelUse('chat').error);
+  } finally { fs.rmSync(vaultDirectory, { recursive: true, force: true }); }
+  console.log('Packaged credential manager: chat endpoint/model and speech keys survive reload, then clear; synthetic configuration only');
   for (const address of ['10.0.0.1', '172.16.0.1', '192.168.1.5']) assert.equal(isPrivateIPv4(address), true);
   for (const address of ['8.8.8.8', '172.32.1.1', '192.168..1', '10.1.1.999', null]) assert.equal(isPrivateIPv4(address), false);
   const { WebSocket } = packaged('ws');

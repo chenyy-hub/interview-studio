@@ -20,17 +20,17 @@ function openSection(section) { return call('settings', { section }); }
 async function refresh(restore = false) {
   state.status = await call('status');
   const s = state.status;
-  $('#status').textContent = `${s.sessionActive ? '采音会话已开启（实际连接状态请看诊断）' : '当前未采音'}  ·  回答模型：${s.model ? s.model.provider + ' / ' + s.model.model : '未配置'}  ·  语音服务：${s.sttProvider}  ·  麦克风权限：${s.permissions.microphone}  ·  屏幕录制权限：${s.permissions.screen}`;
+  $('#status').textContent = `${s.sessionActive ? '面试进行中' : '当前未采音'}  ·  ${s.model ? '回答：' + s.model.model : '回答 API 待配置'}  ·  ${s.speech?.configured ? '语音已配置' : '语音转写待配置'}`;
   $('#start').disabled = s.sessionActive;
   $('#stop').disabled = !s.sessionActive;
-  $('#credential-status').textContent = s.credentialStorage?.mode === 'encrypted' ? 'API Key：系统加密保存已启用' : 'API Key：仅本次使用，退出后不保存。需要记住时，可在「语音与术语」启用系统加密保存。';
+  $('#credential-status').textContent = s.credentialStorage?.error || (s.credentialStorage?.mode === 'local' ? 'API 配置保存在本机，下次打开自动使用。' : s.credentialStorage?.mode === 'encrypted' ? 'API Key：系统加密保存已启用' : 'API Key：仅本次使用，退出后不保存。');
   if (restore) {
     state.transcripts = new Map((s.transcripts || []).map(t => [t.segmentId || `${t.speaker}-${t.timestamp}`, t]));
     renderTurns();
     const generation = s.generation;
     if (generation) {
       state.request = generation.running ? generation.id : null;
-      state.quick = generation.quick; state.deep = generation.deep;
+      state.quick = generation.quick; state.deep = generation.deep; state.lastQuestion = generation.question;
       $('#quick').textContent = generation.quick;
       $('#deep').textContent = generation.deep;
       $('#question-title').textContent = generation.question;
@@ -53,11 +53,13 @@ function renderTurns() {
 }
 async function ask(questionOverride) {
   if (state.request) { message('当前正在生成，可以先停止。'); return; }
-  const question = typeof questionOverride === 'string' ? questionOverride : $('#question').value.trim();
+  const recent = [...state.transcripts.values()].filter(t => t.speaker !== 'user' && t.text?.trim()).at(-1)?.text || '';
+  const question = typeof questionOverride === 'string' ? questionOverride : $('#question').value.trim() || recent;
   if (!question) throw new Error('请先输入问题或点选一条转写');
   if (!state.status) await refresh();
   if (!state.status.model) { await selectView('connect'); throw new Error('先在「服务配置」选择回答服务和模型；文字提问不需要先开采音。'); }
   const id = 'studio-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+  state.lastQuestion = question;
   state.request = id; state.quick = ''; state.deep = ''; state.lastError = '';
   $('#quick').textContent = '正在请求模型…'; $('#deep').textContent = $('#dual').checked ? '正在请求模型…' : '';
   $('#quick-time').textContent = ''; $('#deep-time').textContent = '';
@@ -76,7 +78,9 @@ async function capture(area) {
 }
 async function selectView(view) {
   state.view = view; message('');
-  document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view || b.dataset.view === 'connect' && ['setup','performance','privacy','diagnostics'].includes(view)));
+  $('#settings-back').hidden = !['setup','performance','privacy','diagnostics'].includes(view);
+  $('#capture-ask').hidden = view !== 'written';
   const tasks = { interview:['面试助手','实时转写、资料增强、流式回答，在一个 App 中完成。'], written:['笔试 / 截图助手','输入练习题或附加屏幕截图，分析原理、解法与边界情况。'], resume:['简历优化','先导入简历或填写真实经历，再输入目标岗位与修改要求。'], review:['记录与复盘','根据真实问答整理改进方向与后续练习。'] };
   const isTask = !!tasks[view]; $('#work').hidden = !isTask; $('#other').hidden = isTask;
   if (isTask) { $('#task-title').textContent = tasks[view][0]; $('#task-description').textContent = tasks[view][1]; $('#question').placeholder = view === 'resume' ? '例如：根据已导入的简历，优化 BSP 驱动工程师岗位的项目经历，不添加虚构内容。' : '输入问题，或点选左边的转写…'; return; }
@@ -113,7 +117,10 @@ async function renderConnections() {
   const [connections, use, credentials] = await Promise.all([native.aiConnectionsList(), native.chatModelGet(), native.getStoredCredentials()]);
   const compatible = connections.filter(c => c.type === 'openai');
   const selected = compatible.find(c => c.id === use.connectionId);
-  $('#other').innerHTML = `<h1>服务配置</h1><p>回答模型负责理解问题和生成答案；语音服务负责把电脑声音转成文字。二者分别配置，保存配置不会自动调用模型。</p><div class="box"><h2>① 回答模型 · OpenAI 兼容接口</h2><label>已有连接<select id="connection-id"><option value="">新建连接</option>${compatible.map(c => `<option value="${escapeText(c.id)}">${escapeText(c.name)}</option>`).join('')}</select></label><label>连接名称<input id="connection-name" value="DeepSeek" autocomplete="off"></label><label>API 地址<input id="connection-url" value="https://api.deepseek.com" spellcheck="false" autocomplete="off"></label><label>API Key<input id="connection-key" type="password" autocomplete="off" placeholder="填写对应服务的 API Key"></label><label>模型名称<input id="connection-model" value="deepseek-flash" spellcheck="false" autocomplete="off"></label><label>回答语言<select id="answer-language"><option value="Chinese">中文</option><option value="English">English</option></select></label><div class="row"><button id="save-connection" class="primary">应用回答配置</button><button id="test-connection">测试回答连接（会调用模型）</button><button id="advanced-models">更多模型与高级设置</button></div><p>默认仅本次运行有效。Claude / Gemini 等其他协议，可用高级设置。模型名称需使用服务商实际提供的名称。</p></div><div class="box"><h2>② 语音转写 · 系统声音识别</h2><p>${escapeText(state.status.speech?.configured ? '当前服务已填写凭证，尚需测试连接。' : state.status.speech?.reason)}</p><label>语音服务<select id="speech-provider"><option value="">请选择语音服务</option><option value="deepgram">Deepgram</option><option value="groq">Groq Whisper</option><option value="openai">OpenAI 语音转写</option><option value="google">Google Cloud（高级配置）</option></select></label><label>语音服务 API Key<input id="speech-key" type="password" autocomplete="off" placeholder="不是回答模型的 Key，填写对应语音服务的 Key"></label><label>识别模型（留空使用服务默认）<input id="speech-model" spellcheck="false" autocomplete="off"></label><label>识别语言<select id="speech-language"><option value="chinese">中文</option><option value="english-us">English (US)</option></select></label><div class="row"><button id="save-speech-provider" class="primary">应用语音配置</button><button id="advanced-speech">其他语音服务 / Google 文件</button><button id="capture-settings">选择系统声音与麦克风</button></div><p>文字问答只需完成①；要实时转写再完成②。系统声音默认采集电脑播放的音频，麦克风是可选的独立一路。</p></div>`;
+  $('#other').innerHTML = `<h1>设置</h1><p>第一次填写后保存即可，下次打开自动使用。只用文字问答时，只需配置回答模型。</p><div class="box"><h2>回答模型 API</h2><label>服务<select id="answer-preset"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">自定义兼容接口</option></select></label><input id="connection-name" type="hidden" value="DeepSeek"><label>API 地址<input id="connection-url" value="https://api.deepseek.com" spellcheck="false" autocomplete="off"></label><label>API Key<input id="connection-key" type="password" autocomplete="off" placeholder="填写一次，保存在此电脑"></label><label>模型名称<input id="connection-model" value="deepseek-flash" spellcheck="false" autocomplete="off"></label><details><summary>管理其他连接与语言</summary><label>已有连接<select id="connection-id"><option value="">新建连接</option>${compatible.map(c => `<option value="${escapeText(c.id)}">${escapeText(c.name)}</option>`).join('')}</select></label><label>回答语言<select id="answer-language"><option value="Chinese">中文</option><option value="English">English</option></select></label><button id="advanced-models">其他模型协议</button></details><div class="row"><button id="save-connection" class="primary">保存 API 配置</button><button id="test-connection">测试连接（会调用模型）</button></div><p>Key 不回显。留空可沿用已保存的 Key；更换服务时需填写对应 Key。</p></div><details class="box" ${state.status.speech?.configured ? '' : 'open'}><summary>语音转写 ${state.status.speech?.configured ? '· 已配置' : '· 实时听题需要'}</summary><p>语音服务把电脑声音转为文字，与回答 API 分别配置。</p><label>语音服务<select id="speech-provider"><option value="">请选择语音服务</option><option value="deepgram">Deepgram</option><option value="groq">Groq Whisper</option><option value="openai">OpenAI 语音转写</option><option value="google">Google Cloud（高级配置）</option></select></label><label>语音 API Key<input id="speech-key" type="password" autocomplete="off" placeholder="填写此语音服务的 Key"></label><details><summary>识别模型与语言</summary><label>识别模型（留空使用默认）<input id="speech-model" spellcheck="false" autocomplete="off"></label><label>识别语言<select id="speech-language"><option value="chinese">中文</option><option value="english-us">English (US)</option></select></label><button id="advanced-speech">其他语音服务 / Google 文件</button></details><div class="row"><button id="save-speech-provider" class="primary">保存语音配置</button><button id="capture-settings">更多音频选项</button></div></details><details class="box"><summary>高级设置</summary><p>系统声音、手动快答和单栏回答已设为默认，日常使用无需调整。</p><div class="settings-links"><button data-settings-view="setup">音频设备与术语</button><button data-settings-view="performance">回复速度</button><button data-settings-view="privacy">窗口与共享保护</button><button data-settings-view="diagnostics">连接与错误诊断</button></div></details><details class="box"><summary>本机配置与清除</summary><p>API 地址、模型和 Key 保存在本机用户目录的加密文件中。加密密钥也在该目录，同一系统账户下的程序可以读取；不等同于系统钥匙串保护。保存配置不会自动调用模型。</p><button id="clear-credentials">清除此电脑保存的 API 配置</button><button id="legacy-credentials">导入旧系统加密凭证</button></details>`;
+  document.querySelectorAll('[data-settings-view]').forEach(button => button.onclick = action(() => selectView(button.dataset.settingsView)));
+  $('#clear-credentials').onclick = action(async () => { if (!window.confirm('清除本机保存的模型与语音 API 配置？下次使用需重新填写。简历和记录会保留。')) return; await call('credentials-clear'); await renderConnections(); message('本机 API 配置已清除。'); });
+  $('#legacy-credentials').onclick = action(async () => { await call('credentials-enable'); await renderConnections(); message('旧凭证已导入本机配置。'); });
   $('#connection-id').value = selected?.id || '';
   function fillConnection() {
     const current = compatible.find(c => c.id === $('#connection-id').value);
@@ -122,8 +129,10 @@ async function renderConnections() {
     $('#connection-key').value = '';
     $('#connection-key').placeholder = current?.hasApiKey ? '已填写，留空沿用；不回显 Key' : '填写对应服务的 API Key';
     $('#connection-model').value = current?.id === use.connectionId ? use.model : current ? '' : 'deepseek-flash';
+    $('#answer-preset').value = current?.baseUrl?.includes('api.openai.com') ? 'openai' : !current || current.baseUrl?.includes('api.deepseek.com') ? 'deepseek' : 'custom';
   }
   fillConnection(); $('#connection-id').onchange = fillConnection;
+  $('#answer-preset').onchange = () => { const preset = $('#answer-preset').value; $('#connection-id').value = ''; $('#connection-key').value = ''; $('#connection-name').value = preset === 'openai' ? 'OpenAI' : preset === 'deepseek' ? 'DeepSeek' : '自定义接口'; $('#connection-url').value = preset === 'openai' ? 'https://api.openai.com/v1' : preset === 'deepseek' ? 'https://api.deepseek.com' : ''; $('#connection-model').value = preset === 'deepseek' ? 'deepseek-flash' : ''; };
   $('#save-connection').onclick = action(async () => {
     const id = $('#connection-id').value;
     const name = $('#connection-name').value.trim(), baseUrl = $('#connection-url').value.trim(), model = $('#connection-model').value.trim(), apiKey = $('#connection-key').value.trim();
@@ -136,7 +145,7 @@ async function renderConnections() {
     $('#connection-key').value = '';
     checked(await native.chatModelSet({ connectionId: result.id, model }));
     checked(await native.setAiResponseLanguage($('#answer-language').value));
-    await renderConnections(); message('回答配置已应用，尚未测试连接。');
+    await renderConnections(); message('API 配置已保存在本机，下次打开自动使用。尚未测试连接。');
   });
   $('#test-connection').onclick = action(async () => { const current = await native.chatModelGet(); if (!current.connectionId || !current.model) throw new Error('请先应用回答配置'); message('正在测试回答模型…'); checked(await native.modelTest({ job: 'chat', ...current })); message('回答模型连接测试通过。'); });
   $('#speech-provider').value = ['deepgram','groq','openai'].includes(credentials.sttProvider) || state.status.speech?.configured ? credentials.sttProvider : '';
@@ -155,13 +164,14 @@ async function renderConnections() {
     checked(await native.setSttModel(provider, model));
     checked(await native.setRecognitionLanguage(language, 'them'));
     checked(await native.setRecognitionLanguage(language, 'user'));
-    await renderConnections(); message('语音配置已应用。尚未开始采音或测试识别效果。');
+    await renderConnections(); message('语音配置已保存在本机，下次打开自动使用。尚未开始采音。');
   });
   $('#advanced-models').onclick = action(() => openSection('models')); $('#advanced-speech').onclick = action(() => openSection('providers')); $('#capture-settings').onclick = action(() => selectView('setup'));
 }
 async function renderMaterials() {
   await refresh(); const documents = state.status.documents;
-  $('#other').innerHTML = `<h1>简历与知识资料</h1><div class="box"><h2>真实背景</h2><p>保存在本机，提问时作为背景送给已配置的模型。不会把示例当成你的经历。</p><textarea id="notes" style="min-height:210px" aria-label="真实背景">${escapeText(state.status.preferences.notes)}</textarea><button id="save-notes" class="primary">保存背景</button></div><div class="box"><div class="row"><h2>资料文件</h2><span class="grow"></span><button id="import" class="primary">导入 PDF / DOCX / TXT / MD</button></div><p>当前 App 使用文字全文背景；上游的向量知识库可在「Pika 完整功能页」使用。</p>${documents.length ? documents.map(d => `<div class="entry"><div class="grow"><b>${escapeText(d.name)}</b><p>${d.characters} 字符</p></div><button data-remove-doc="${d.id}">移除</button></div>`).join('') : '<p class="empty">还没有导入文件。扫描 PDF 需要先做 OCR。</p>'}</div>`;
+  $('#other').innerHTML = `<h1>简历与知识资料</h1><button id="resume-task">打开简历优化</button><div class="box"><h2>真实背景</h2><p>保存在本机，提问时作为背景送给已配置的模型。不会把示例当成你的经历。</p><textarea id="notes" style="min-height:210px" aria-label="真实背景">${escapeText(state.status.preferences.notes)}</textarea><button id="save-notes" class="primary">保存背景</button></div><div class="box"><div class="row"><h2>资料文件</h2><span class="grow"></span><button id="import" class="primary">导入 PDF / DOCX / TXT / MD</button></div><p>提问时按相关性选取资料，兼顾背景信息与回复速度。</p>${documents.length ? documents.map(d => `<div class="entry"><div class="grow"><b>${escapeText(d.name)}</b><p>${d.characters} 字符</p></div><button data-remove-doc="${d.id}">移除</button></div>`).join('') : '<p class="empty">还没有导入文件。扫描 PDF 需要先做 OCR。</p>'}</div>`;
+  $('#resume-task').onclick = action(() => selectView('resume'));
   $('#save-notes').onclick = action(async () => { await call('preferences', { ...state.status.preferences, notes: $('#notes').value }); message('真实背景已保存。'); });
   $('#import').onclick = action(async () => { const result = await call('import'); if (result.cancelled) return; await renderMaterials(); message(`已导入 ${result.added.length} 份。` + result.failed.map(f => `${f.name}：${f.error}`).join('\n')); });
   document.querySelectorAll('[data-remove-doc]').forEach(b => b.onclick = action(async () => { await call('documents', { remove: b.dataset.removeDoc }); await renderMaterials(); }));
@@ -180,10 +190,9 @@ async function renderSetup() {
   await refresh();
   $('#other').innerHTML = `<h1>语音与术语</h1><div class="box"><h2>语音服务与输入设备</h2><p>App 复用 Pika 的原生麦克风、系统音频与 STT 服务。回答模型和语音服务需分别配置。</p><div class="row"><button id="provider-settings">配置服务商</button><button id="audio-settings">语音与翻译设置</button><button id="shortcuts">自定义全局快捷键</button></div></div><div class="box"><h2>专业术语纠正</h2><p>每行「常见错词 =&gt; 正确写法」。这是转写后的确定性文字纠正，不等同于提升原始语音识别准确率。原文会保留。</p><textarea id="glossary" placeholder="常见错词 => 正确术语">${escapeText(state.status.preferences.glossary)}</textarea><label><input id="auto-answer" type="checkbox" ${state.status.preferences.autoAnswer ? 'checked' : ''}> 对含提问特征的对方发言自动快答（可能误触发；每次会产生模型调用）</label><button id="save-speech" class="primary">保存设置</button></div>`;
   const credentialCard = document.createElement('div'); credentialCard.className = 'box';
-  credentialCard.innerHTML = `<h2>API Key 保存方式</h2><p>${state.status.credentialStorage?.mode === 'encrypted' ? '已启用系统加密保存。下次启动仍先进入仅本次使用模式，主动载入后才访问钥匙串。' : '默认仅本次使用：Key 在内存中，退出后不保存，无需钥匙串密码。已有的加密文件会保留。'}</p><button id="enable-secrets">启用加密保存 / 载入已有凭证</button><p>此操作可能弹出 macOS 登录钥匙串授权；拒绝后仍可继续仅本次使用。不会使用明文文件保存 API Key。</p>`;
+  credentialCard.innerHTML = `<h2>本地保存</h2><p>API 配置在设置中保存，下次启动自动读取，无需钥匙串密码。</p><button id="enable-secrets">导入旧的系统加密凭证（可选）</button><p>只有导入旧凭证可能要求系统钥匙串授权；日常启动和保存不调用钥匙串。</p>`;
   $('#other').insertBefore(credentialCard, $('#other').children[1]);
-  $('#enable-secrets').disabled = state.status.credentialStorage?.mode === 'encrypted';
-  $('#enable-secrets').onclick = action(async () => { await call('credentials-enable'); await renderSetup(); message('系统加密保存已启用。'); });
+  $('#enable-secrets').onclick = action(async () => { await call('credentials-enable'); await renderSetup(); message('旧凭证已导入本地配置。'); });
   const options = (list, selected) => list.filter(d => d.id !== 'default' && d.id !== 'sck').map(d => `<option value="${escapeText(d.id)}" ${d.id === selected ? 'selected' : ''}>${escapeText(d.name)}</option>`).join('');
   const audio = state.status.captureSettings;
   const audioCard = document.createElement('div'); audioCard.className = 'box';
@@ -223,7 +232,12 @@ native.onNativeAudioTranscript(data => { if (!data.final) $('#partial').textCont
 native.onMeetingStateChanged(() => refresh().catch(error => message(error.message)));
 native.onSessionReset(() => { state.transcripts.clear(); renderTurns(); });
 native.onGlobalShortcut(data => { if (data?.action === 'answer' || data?.action === 'manual-answer') action(() => ask())(); });
-$('#start').onclick = action(async () => { await refresh(); if (!state.status.speech?.configured) { const reason = state.status.speech?.reason; await selectView('connect'); throw new Error(reason || '请先配置语音转写服务'); } await call('start'); await refresh(); message('采音会话已启动，正在连接语音服务。实际音频与转写状态请看诊断。'); });
+$('#start').onclick = action(async () => { await refresh(); if (!state.status.speech?.configured) { const reason = state.status.speech?.reason; await selectView('connect'); throw new Error(reason || '请先配置语音转写服务'); } $('#session-mic').checked = state.status.captureSettings.captureMicrophone; $('#session-screen').checked = state.view === 'written'; $('#source-dialog').showModal(); });
+$('#source-cancel').onclick = () => $('#source-dialog').close();
+$('#source-start').onclick = action(async () => { if ($('#source-start').disabled) return; $('#source-start').disabled = true; try { await call('audio-preferences', { ...state.status.captureSettings, captureMicrophone: $('#session-mic').checked }); await call('start'); $('#source-dialog').close(); if ($('#session-screen').checked) await selectView('written'); await refresh(); message('面试采音已启动，正在连接语音服务。'); } finally { $('#source-start').disabled = false; } });
+$('#settings-back').onclick = action(() => selectView('connect'));
+$('#retry-answer').onclick = action(() => { if (!state.lastQuestion) throw new Error('还没有可重新生成的问题'); return ask(state.lastQuestion); });
+$('#capture-ask').onclick = action(async () => { if (state.request) throw new Error('请先停止当前生成'); if (!state.status?.model) { await selectView('connect'); throw new Error('请先配置支持图片的回答模型'); } state.images = []; renderImages(); await capture(true); if (!state.images.length) return; await ask($('#question').value.trim() || '请识别并解答截图中的题目，先给结论，再说明思路；代码题请给出代码与复杂度。'); });
 $('#stop').onclick = action(async () => { checked(await native.endMeeting()); await refresh(); });
 $('#overlay').onclick = action(async () => { checked(await native.setWindowMode('overlay')); });
 $('#settings').onclick = action(() => selectView('connect'));
@@ -237,6 +251,7 @@ $('#export-answer').onclick = action(() => call('export', { text: `# ${$('#quest
 $('#export-transcript').onclick = action(() => call('export', { text: '# 转写记录\n\n' + [...state.transcripts.values()].map(t => `${t.speaker === 'user' ? '我' : '对方'}：${t.text}`).join('\n\n'), filename: 'interview-transcript.md' }));
 $('#speak').onclick = action(() => { if (!state.quick) throw new Error('还没有可播报的回答'); speechSynthesis.cancel(); const speech = new SpeechSynthesisUtterance(state.quick); speech.lang = 'zh-CN'; speech.onerror = () => message('系统语音播报失败，请检查系统语音资源。'); speechSynthesis.speak(speech); });
 $('#question').addEventListener('keydown', event => { if (!event.isComposing && event.keyCode !== 229 && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); action(() => ask())(); } });
+$('#dual').onchange();
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = action(() => selectView(b.dataset.view)));
 window.addEventListener('unhandledrejection', event => { message(event.reason?.message || '操作失败'); event.preventDefault(); });
 refresh(true).catch(error => message('桌面服务未启动：' + error.message));

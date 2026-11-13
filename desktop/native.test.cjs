@@ -30,8 +30,8 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const originalLoad = Module._load;
   Module._load = function(name, parent, isMain) {
     if (name === 'electron') return electron;
-    if (name.endsWith('/services/CredentialsManager.js')) return { CredentialsManager: { getInstance: () => cm } };
-    if (name.endsWith('/services/connectionSecrets.js')) return { redactConnectionError: error => error };
+    if (name.replaceAll('\\', '/').endsWith('/services/CredentialsManager.js')) return { CredentialsManager: { getInstance: () => cm } };
+    if (name.replaceAll('\\', '/').endsWith('/services/connectionSecrets.js')) return { redactConnectionError: error => error };
     return originalLoad.apply(this, arguments);
   };
   t.after(() => { Module._load = originalLoad; });
