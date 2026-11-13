@@ -23,19 +23,16 @@ def patch(root):
 struct ComGuard(bool);
 impl ComGuard {
     fn initialize() -> Result<Self> {
-        let result = wasapi::initialize_mta();
-        if result.is_ok() {
-            Ok(Self(true))
-        } else if result.0 as u32 == 0x80010106 { // RPC_E_CHANGED_MODE
-            Ok(Self(false))
-        } else {
-            Err(anyhow::anyhow!("COM initialization failed: {:?}", result))
+        match wasapi::initialize_mta() {
+            Ok(()) => Ok(Self(true)),
+            Err(error) if error.code().0 as u32 == 0x80010106 => Ok(Self(false)), // RPC_E_CHANGED_MODE
+            Err(error) => Err(anyhow::anyhow!("COM initialization failed: {}", error)),
         }
     }
 }
 impl Drop for ComGuard {
     fn drop(&mut self) {
-        if self.0 { unsafe { windows::Win32::System::Com::CoUninitialize(); } }
+        if self.0 { wasapi::deinitialize(); }
     }
 }
 
