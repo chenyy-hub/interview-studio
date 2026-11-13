@@ -30,7 +30,9 @@ def runtime_payload(read):
     main = read('dist-electron/electron/main.js')
     main = replace_once(main, "if (!(await (0, logging_1.ensureMacMicrophoneAccess)('meeting start'))) {", "this.studioCaptureMicrophone = metadata?.audio?.captureMicrophone === true;\n        if (this.studioCaptureMicrophone && !(await (0, logging_1.ensureMacMicrophoneAccess)('meeting start'))) {")
     for call in ['this.microphoneCapture?.start();', 'this.googleSTT_User?.start();']:
-        if main.count(call) != 2:
+        # The official 3.4.0 binary contains a second recovery branch; a clean
+        # build of the pinned 3.4.0 source contains the meeting-start branch.
+        if main.count(call) not in (1, 2):
             raise RuntimeError('Unexpected microphone start paths')
         main = main.replace(call, 'if (this.studioCaptureMicrophone) ' + call)
     additions['dist-electron/electron/main.js'] = main.encode()
