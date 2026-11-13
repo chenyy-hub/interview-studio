@@ -42,6 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: upstream/native-module
+          cache-on-failure: true
       - name: Test desktop extension
         shell: pwsh
         run: |
@@ -58,6 +59,8 @@ jobs:
       - name: Compile original main process
         working-directory: upstream
         run: pnpm run build:electron:raw
+      - name: Adapt pinned Windows loopback backend
+        run: python desktop/patch_windows_native.py upstream
       - name: Compile Windows audio addon
         working-directory: upstream
         run: pnpm run build:native:raw

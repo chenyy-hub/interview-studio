@@ -76,7 +76,7 @@ test('Chinese connection form saves to the native registry without a model call 
 
 test('saved local status is visible, source confirmation precedes capture, and screenshot asking is one action', async () => {
   const elements = new Map(), calls = [];
-  let opened = 0, closed = 0;
+  let opened = 0, closed = 0, rejectStart = false;
   const element = selector => {
     if (!elements.has(selector)) elements.set(selector, { value: '', innerHTML: '', children: [], insertBefore() {}, classList: { toggle() {} }, querySelectorAll: () => [], addEventListener() {}, checked: false,
       showModal() { opened++; }, close() { closed++; } });
@@ -90,6 +90,7 @@ test('saved local status is visible, source confirmation precedes capture, and s
   Object.defineProperty(context, 'studio', { configurable: false, value: { onEvent() {}, invoke: async (name, data) => {
     calls.push({ name, data });
     if (name === 'status') return status;
+    if (name === 'start' && rejectStart) return { success: false, error: 'synthetic permission denied' };
     if (name === 'capture') return { path: '/synthetic/screen.png', preview: 'data:image/png;base64,fixture' };
     return { success: true };
   } } });
@@ -103,6 +104,11 @@ test('saved local status is visible, source confirmation precedes capture, and s
   assert.equal(closed, 1);
   assert.equal(calls.find(c => c.name === 'audio-preferences').data.captureMicrophone, true);
   assert.equal(calls.filter(c => c.name === 'start').length, 1);
+  rejectStart = true;
+  await element('#start').onclick(); await element('#source-start').onclick();
+  assert.equal(closed, 2);
+  assert.match(element('#notice').textContent, /permission denied/);
+  assert.equal(element('#source-start').disabled, false);
   await nav.onclick();
   assert.equal(element('#capture-ask').hidden, false);
   await element('#capture-ask').onclick();
