@@ -6,8 +6,8 @@ function attach(manager, { directory } = {}) {
   if (manager.studioCredentialSession) return manager.studioCredentialSession;
   const initialize = manager.init.bind(manager);
   const save = manager.saveCredentials.bind(manager);
-  const storageStatus = manager.getStorageStatus.bind(manager);
-  const write = manager.writeCredentials.bind(manager);
+  const storageStatus = manager.getStorageStatus?.bind(manager) || (() => ({ mode: 'unknown' }));
+  const write = manager.writeCredentials?.bind(manager);
   const clearAll = manager.clearAll?.bind(manager);
   const vault = directory ? require('./local-vault.cjs').createVault(directory) : null;
   let localError = '';
@@ -43,6 +43,7 @@ function attach(manager, { directory } = {}) {
   };
   manager.writeCredentials = (file, useEncryption) => {
     if (!useEncryption) throw new Error('无法使用系统加密，未将 API Key 写入磁盘。可继续选择仅本次使用。');
+    if (!write) throw new Error('此版本不支持旧系统凭证格式，请在设置中填写并保存本机 API 配置。');
     return write(file, true);
   };
   const session = {
@@ -54,6 +55,7 @@ function attach(manager, { directory } = {}) {
     },
     enableEncrypted() {
       if (encrypted) return session.state();
+      if (!write) throw new Error('此版本不支持旧系统加密凭证导入，请在设置中重新填写 API 配置。');
       const current = structuredClone(manager.credentials);
       const previous = { persisted: manager.persistedCredentials, blocked: manager.saveBlocked, status: manager.storageStatus };
       try {

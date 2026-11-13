@@ -38,6 +38,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron-builder\Cache
+            ~\AppData\Local\electron\Cache
+          key: windows-electron-builder-45.1.0-v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -66,11 +72,16 @@ jobs:
         run: pnpm run build:native:raw
       - name: Apply desktop extension
         run: python desktop/prepare_windows.py upstream
-      - name: Package Windows installers
+      - name: Package Windows runtime
         working-directory: upstream
-        run: pnpm exec electron-builder --win --x64 --publish never
+        timeout-minutes: 10
+        run: pnpm exec electron-builder --win --x64 --dir --publish never
       - name: Verify packaged runtime
         run: node desktop/check_windows_package.cjs upstream/release/win-unpacked
+      - name: Build installer and portable executables
+        working-directory: upstream
+        timeout-minutes: 15
+        run: pnpm exec electron-builder --win --x64 --prepackaged release/win-unpacked --publish never
       - name: Hash artifacts
         shell: pwsh
         run: |

@@ -41,3 +41,12 @@ test('explicit clearing removes local keys and a subsequent session starts witho
   assert.equal(fs.existsSync(path.join(directory, 'device.key')), false);
   assert.deepEqual(manager(directory).credentials, {});
 });
+
+test('older upstream managers without storage-status/write helpers still persist locally', t => {
+  const directory = temp(t);
+  const cm = { credentials: {}, init() { throw new Error('legacy keychain must not open'); }, saveCredentials() { throw new Error('legacy save must not run'); } };
+  const session = attach(cm, { directory }); cm.init(); cm.credentials = { apiKey: 'synthetic-legacy-secret' }; cm.saveCredentials();
+  assert.equal(createVault(directory).load().apiKey, 'synthetic-legacy-secret');
+  assert.equal(cm.getStorageStatus().mode, 'local');
+  assert.throws(() => session.enableEncrypted(), /不支持旧系统加密凭证导入/);
+});
