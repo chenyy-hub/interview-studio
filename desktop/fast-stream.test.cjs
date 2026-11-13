@@ -46,6 +46,25 @@ test('first-visible-text timeout aborts even an uncooperative stream', async () 
   assert.equal(cancelled, true);
 });
 
+test('OpenAI official endpoint uses completion budgets without foreign thinking parameters', async () => {
+  let payload;
+  await collect(streamOpenAI({ connection: { ...connection, baseUrl: 'https://api.openai.com/v1' }, model: 'gpt-5-mini', question: 'fixture', system: '',
+    fetchImpl: async (_url, init) => { payload = JSON.parse(init.body); return new Response(bytes('data: {"choices":[{"delta":{"content":"answer"}}]}\n\ndata: [DONE]\n\n')); } }));
+  assert.equal(payload.max_tokens, undefined);
+  assert.equal(payload.max_completion_tokens, 4096);
+  assert.equal(payload.thinking, undefined);
+});
+
+test('truncated and oversized streams surface errors instead of reporting a complete answer', async () => {
+  await assert.rejects(collect(sseContent(bytes('data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'))), /输出上限/);
+  await assert.rejects(collect(sseContent(bytes('x'.repeat(1048577), 1048577))), /数据过大/);
+});
+
+test('first-text timeout also bounds an uncooperative fetch implementation', async () => {
+  await assert.rejects(collect(streamOpenAI({ connection, model: 'fixture', question: 'fixture', system: '', firstTokenMs: 15,
+    fetchImpl: () => new Promise(() => {}) })), /首段文字/);
+});
+
 test('idle timeout preserves already delivered text and HTTP failures are not retried silently', async () => {
   const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"first"}}]}\n\n')); } });
   const received = [];

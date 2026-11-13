@@ -1,3 +1,25 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>面试工作室 · 配对端</title><style>body{font:16px/1.8 system-ui;margin:20px;background:#f3f6fc;color:#17243a}article{background:white;border:1px solid #dce4ef;padding:15px;margin:12px 0;border-radius:9px}pre{white-space:pre-wrap;font:inherit}textarea{box-sizing:border-box;width:100%;padding:12px;font:inherit}button{padding:10px 20px;font:inherit;background:#2563eb;color:white;border:0;border-radius:6px}</style><h2>面试工作室 · 配对端</h2><p id="status">连接中…</p><article><h3>最近转写</h3><div id="transcript">等待桌面端采音。</div></article><article><h3>回答</h3><pre id="answer">等待提问。</pre></article><textarea id="question" placeholder="输入问题，交给电脑端已配置的模型"></textarea><button id="ask">提问</button><script>
-const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);const ws=new WebSocket('ws://'+location.host+'/?token='+encodeURIComponent(token));let current='';const rows=new Map();function show(){document.getElementById('transcript').textContent=[...rows.values()].slice(-10).map(s=>(s.speaker==='user'?'我：':'对方：')+s.text).join('\n')}ws.onopen=()=>document.getElementById('status').textContent='已连接桌面端 · 同网配对（有效期一小时）';ws.onclose=()=>document.getElementById('status').textContent='连接已断开，请在桌面端重新配对';ws.onerror=()=>document.getElementById('status').textContent='连接失败，请确认处于同一网络';ws.onmessage=e=>{const d=JSON.parse(e.data);if(d.kind==='snapshot'){for(const s of d.transcripts)rows.set(s.segmentId||s.timestamp,s);show()}if(d.kind==='transcript'){rows.set(d.segment.segmentId,d.segment);show()}if(d.kind==='started'){current=d.id;document.getElementById('answer').textContent=''}if(d.kind==='token'&&d.id===current&&d.column==='quick')document.getElementById('answer').textContent+=d.text;if(d.kind==='error')document.getElementById('status').textContent=d.message;if(d.kind==='reset'){rows.clear();show()}};document.getElementById('ask').onclick=()=>{const question=document.getElementById('question').value.trim();if(question&&ws.readyState===1)ws.send(JSON.stringify({kind:'ask',question}))};
+const token = location.hash.slice(1); history.replaceState(null, '', location.pathname);
+const rows = new Map(); let ws, current = '', retry = 0, timer, leaving = false;
+const status = text => document.getElementById('status').textContent = text;
+function show() { document.getElementById('transcript').textContent = [...rows.values()].slice(-10).map(s => (s.speaker === 'user' ? '我：' : '对方：') + s.text).join('\n'); }
+function connect() {
+ if (!token) { status('缺少配对凭证，请在电脑端重新生成链接。'); return; }
+ ws = new WebSocket('ws://' + location.host + '/?token=' + encodeURIComponent(token));
+ ws.onopen = () => { retry = 0; status('已连接桌面端 · 同网配对（有效期一小时）'); };
+ ws.onclose = () => { if (leaving) return; if (retry >= 5) { status('重连未成功，请在桌面端确认网络或重新配对。'); return; } const delay = Math.min(1000 * 2 ** retry++, 8000); status('连接中断，正在重新连接…'); timer = setTimeout(connect, delay); };
+ ws.onerror = () => status('网络连接失败，等待重连…');
+ ws.onmessage = event => {
+  let d; try { d = JSON.parse(event.data); } catch { return; }
+  if (d.kind === 'snapshot') { rows.clear(); for (const s of d.transcripts || []) rows.set(s.segmentId || s.timestamp, s); show(); if (d.generation) { current = d.generation.id; document.getElementById('answer').textContent = d.generation.quick || d.generation.deep || ''; } }
+  if (d.kind === 'transcript') { rows.set(d.segment.segmentId, d.segment); show(); }
+  if (d.kind === 'started') { current = d.id; document.getElementById('answer').textContent = ''; }
+  if (d.kind === 'token' && d.id === current && d.column === 'quick') document.getElementById('answer').textContent += d.text;
+  if (d.kind === 'error') status(d.message);
+  if (d.kind === 'reset') { rows.clear(); current = ''; show(); document.getElementById('answer').textContent = ''; }
+ };
+}
+connect();
+document.getElementById('ask').onclick = () => { const question = document.getElementById('question').value.trim(); if (question && ws?.readyState === 1) ws.send(JSON.stringify({ kind: 'ask', question })); };
+window.addEventListener('pagehide', () => { leaving = true; clearTimeout(timer); ws?.close(); });
 </script></html>

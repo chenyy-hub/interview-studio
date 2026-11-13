@@ -23,7 +23,7 @@ function install(appState) {
   try { store = { ...store, ...JSON.parse(fs.readFileSync(storePath, 'utf8')) }; } catch (error) { if (error.code !== 'ENOENT') console.warn('[Studio] Preferences could not be loaded'); }
   try { store.audio = audioPreferences(store.audio); } catch { store.audio = { backend: process.platform === 'win32' ? 'wasapi' : 'sck', captureMicrophone: false, inputDeviceId: 'default', outputDeviceId: 'default' }; }
   store.performance = { mode: store.performance?.mode === 'balanced' ? 'balanced' : 'fast' };
-  store.privacy = { enabled: store.privacy?.enabled !== false };
+  store.privacy = { enabled: store.privacy?.enabled !== false, selfTest: store.privacy?.selfTest || null };
   const contextIndex = new ContextIndex(store.documents, store.notes);
   const reindex = () => contextIndex.reset(store.documents, store.notes);
   const privacy = createPrivacy({ app, appState, BrowserWindow, globalShortcut });
@@ -89,8 +89,8 @@ function install(appState) {
     store.privacy.enabled = data.enabled; privacy.apply(data.enabled); write(); return { success: true };
   });
   handle('privacy-test', data => {
-    if (!['feishu','tencent','other'].includes(data?.client) || !['screen','window'].includes(data?.capture) || !['passed','failed'].includes(data?.result) || typeof data.version !== 'string' || data.version.length > 80) throw new Error('请填写会议客户端、版本、共享方式和实际结果');
-    store.privacy.selfTest = { ...data, at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.5.0', source: 'user-reported' };
+    if (!['feishu','tencent','other'].includes(data?.client) || !['screen','window'].includes(data?.capture) || !['passed','failed'].includes(data?.result) || typeof data.version !== 'string' || !data.version.trim() || data.version.length > 80) throw new Error('请填写会议客户端、版本、共享方式和实际结果');
+    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.5.0', source: 'user-reported' };
     write(); return { success: true };
   });
   handle('hide', () => { privacy.toggleVisibility(); return { success: true }; });
@@ -272,7 +272,7 @@ function install(appState) {
   ]));
   handle('pair-start', async () => {
     if (room) return room.info;
-    room = await createPairRoom({ onAsk: ask, onClose: () => { room = null; }, snapshot: () => ({ transcripts: [...transcripts.values()].slice(-100) }) });
+    room = await createPairRoom({ onAsk: ask, onClose: () => { room = null; }, snapshot: () => ({ transcripts: [...transcripts.values()].slice(-100), generation: lastGeneration }) });
     return { success: true, ...room.info };
   });
   handle('pair-stop', () => { room?.stop(); room = null; return { success: true }; });
@@ -311,7 +311,14 @@ function install(appState) {
   app.on('before-quit', () => { for (const controller of active.values()) controller.abort(); for (const worker of deviceWorkers) worker.kill('SIGKILL'); room?.stop(); });
 }
 
-async function createPairRoom({ onAsk, snapshot, onClose }) {
+function isPrivateIPv4(address) {
+  if (typeof address !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) return false;
+  const octets = address.split('.').map(Number);
+  return octets.length === 4 && octets.every(n => Number.isInteger(n) && n >= 0 && n <= 255) &&
+    (octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) || (octets[0] === 192 && octets[1] === 168));
+}
+
+async function createPairRoom({ onAsk, snapshot, onClose, bindAddress }) {
   const token = crypto.randomBytes(32).toString('base64url');
   const clients = new Set(); let acceptedHost;
   const server = http.createServer((req, res) => {
@@ -322,7 +329,8 @@ async function createPairRoom({ onAsk, snapshot, onClose }) {
   });
   const { WebSocketServer } = require('ws'); const wsServer = new WebSocketServer({ noServer: true, maxPayload: 24000 });
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://' + req.headers.host);
+    let url;
+    try { url = new URL(req.url, 'http://' + req.headers.host); } catch { socket.destroy(); return; }
     if (url.searchParams.get('token') !== token || req.headers.origin !== 'http://' + req.headers.host || clients.size >= 1 || req.headers.host !== acceptedHost) { socket.destroy(); return; }
     wsServer.handleUpgrade(req, socket, head, ws => wsServer.emit('connection', ws));
   });
@@ -332,19 +340,20 @@ async function createPairRoom({ onAsk, snapshot, onClose }) {
     ws.on('error', () => clients.delete(ws));
     ws.on('message', bytes => {
       try { const data = JSON.parse(bytes.toString()); if (data.kind !== 'ask') return;
-        void onAsk({ id: 'phone-' + Date.now(), task: 'interview', question: data.question, dual: false }).catch(error => ws.send(JSON.stringify({ kind: 'error', message: error.message })));
-      } catch { ws.send(JSON.stringify({ kind: 'error', message: '请求格式错误' })); }
+        void onAsk({ id: 'phone-' + crypto.randomUUID(), task: 'interview', question: data.question, dual: false }).catch(error => { if (ws.readyState === 1) ws.send(JSON.stringify({ kind: 'error', message: error.message })); });
+      } catch { if (ws.readyState === 1) ws.send(JSON.stringify({ kind: 'error', message: '请求格式错误' })); }
     });
   });
-  const addresses = Object.values(os.networkInterfaces()).flat().filter(a => a?.family === 'IPv4' && !a.internal).map(a => a.address);
+  const addresses = Object.entries(os.networkInterfaces()).filter(([name]) => !/^(utun|tun|tap|docker|vbox|vmnet)/i.test(name)).flatMap(([, values]) => values || []).filter(a => a?.family === 'IPv4' && !a.internal && isPrivateIPv4(a.address)).map(a => a.address);
+  if (bindAddress === '127.0.0.1') addresses.unshift(bindAddress); // headless smoke tests only; never accepted from IPC
   if (!addresses.length) { wsServer.close(); throw new Error('没有可用于同网配对的 IPv4 地址'); }
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '0.0.0.0', resolve); });
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, addresses[0], resolve); });
   acceptedHost = `${addresses[0]}:${server.address().port}`;
   let closed = false;
-  const stop = () => { if (closed) return; closed = true; clearTimeout(expiry); for (const ws of clients) ws.close(); wsServer.close(); server.close(); onClose(); };
+  const stop = () => { if (closed) return; closed = true; clearTimeout(expiry); for (const ws of clients) ws.terminate(); wsServer.close(); server.close(); onClose(); };
   const expiry = setTimeout(stop, 60 * 60 * 1000);
   return { info: { url: `http://${acceptedHost}/#${token}`, expiresMinutes: 60, mode: '同一局域网' }, stop,
     publish: data => { for (const ws of clients) if (ws.readyState === 1) ws.send(JSON.stringify(data)); } };
 }
 
-module.exports = { install };
+module.exports = { install, createPairRoom, isPrivateIPv4 };

@@ -19,12 +19,15 @@ async function* sseContent(body, signal) {
     let payload;
     try { payload = JSON.parse(joined); } catch { throw new Error('模型返回的流式数据格式不正确'); }
     if (payload.error) throw new Error(String(payload.error.message || '模型流返回错误').slice(0, 400));
+    if (payload.choices?.[0]?.finish_reason === 'length') throw new Error('回答达到模型输出上限，内容可能不完整；可缩小问题后重试');
+    if (payload.choices?.[0]?.finish_reason === 'content_filter') throw new Error('模型停止了本次回答，请调整问题后重试');
     return { text: payload.choices?.[0]?.delta?.content || '' };
   }
   try {
     while (true) {
       const chunk = await abortable(reader.read(), signal);
       buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done });
+      if (buffer.length + data.reduce((size, line) => size + line.length, 0) > 1048576) throw new Error('模型返回的单段流式数据过大，请检查服务端');
       if (chunk.done && buffer && !buffer.endsWith('\n')) buffer += '\n\n';
       let at;
       while ((at = buffer.indexOf('\n')) >= 0) {
@@ -68,17 +71,23 @@ async function* streamOpenAI({ connection, model, question, context, system, sig
     messages: [{ role: 'system', content: system }, { role: 'user', content: context ? `CONTEXT:\n${context}\n\nUSER QUESTION:\n${question}` : question }],
     max_tokens: column === 'quick' ? mode === 'fast' ? 512 : 900 : 3000,
   };
+  // Official OpenAI has deprecated max_tokens; reasoning tokens also consume
+  // its completion budget, so leave headroom rather than returning empty text.
+  if (new URL(connection.baseUrl).hostname === 'api.openai.com') {
+    body.max_completion_tokens = /^(o\d|gpt-[5-9])/i.test(model) ? (column === 'quick' ? 4096 : 8192) : body.max_tokens;
+    delete body.max_tokens;
+  }
   // Provider-specific parameters are sent only to the verified official host.
   // Generic compatible servers keep their own documented defaults.
   if (new URL(connection.baseUrl).hostname === 'api.deepseek.com' && column === 'quick' && mode === 'fast') body.thinking = { type: 'disabled' };
   const headers = { ...connection.headers, 'Content-Type': 'application/json', Accept: 'text/event-stream' };
   if (connection.apiKey) headers.Authorization = 'Bearer ' + connection.apiKey;
   try {
-    const response = await fetchImpl(endpointFor(connection.baseUrl), { method: 'POST', headers, body: JSON.stringify(body), signal: combined, redirect: 'error' });
+    const response = await abortable(fetchImpl(endpointFor(connection.baseUrl), { method: 'POST', headers, body: JSON.stringify(body), signal: combined, redirect: 'error' }), combined);
     onStage({ event: 'response-headers', column, ms: Math.round(performance.now() - started) });
     if (!response.ok) {
       let detail = '';
-      try { const error = await response.json(); detail = error.error?.message || error.message || ''; } catch {}
+      try { const error = await abortable(response.json(), combined); detail = error.error?.message || error.message || ''; } catch {}
       throw new Error(`模型请求失败（HTTP ${response.status}）${detail ? '：' + String(detail).slice(0, 300) : ''}`);
     }
     if (!response.body) throw new Error('模型返回了空响应');

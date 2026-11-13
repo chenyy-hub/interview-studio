@@ -6,8 +6,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 async function main() {
-  const [archive, fixtureDirectory] = process.argv.slice(2);
-  if (!archive || !fixtureDirectory) throw new Error('Usage: runtime-smoke.cjs APP_ASAR FIXTURE_DIRECTORY');
+  const [archiveArgument, fixtureArgument] = process.argv.slice(2);
+  if (!archiveArgument || !fixtureArgument) throw new Error('Usage: runtime-smoke.cjs APP_ASAR FIXTURE_DIRECTORY');
+  const archive = path.resolve(archiveArgument), fixtureDirectory = path.resolve(fixtureArgument);
   const packaged = createRequire(path.join(path.resolve(archive), 'package.json'));
   const Database = packaged('better-sqlite3');
   const db = new Database(':memory:');
@@ -15,6 +16,48 @@ async function main() {
   console.log('Packaged SQLite: passed');
   assert.equal(typeof packaged('ws').WebSocketServer, 'function');
   console.log('Packaged pairing dependency: passed');
+  // The pure local pairing server lives beside Electron IPC code. In headless
+  // Node mode Electron is unavailable; supply only its unused top-level import.
+  const Module = require('node:module'), originalLoad = Module._load;
+  let pairing;
+  try {
+    Module._load = function (name, ...args) { return name === 'electron' ? {} : originalLoad.call(this, name, ...args); };
+    pairing = packaged('./desktop/native.cjs');
+  } finally { Module._load = originalLoad; }
+  const { createPairRoom, isPrivateIPv4 } = pairing;
+  for (const address of ['10.0.0.1', '172.16.0.1', '192.168.1.5']) assert.equal(isPrivateIPv4(address), true);
+  for (const address of ['8.8.8.8', '172.32.1.1', '192.168..1', '10.1.1.999', null]) assert.equal(isPrivateIPv4(address), false);
+  const { WebSocket } = packaged('ws');
+  let closed = false, asked;
+  const room = await createPairRoom({ bindAddress: '127.0.0.1', onAsk: async request => { asked = request; }, onClose: () => { closed = true; },
+    snapshot: () => ({ transcripts: [], generation: { id: 'synthetic', quick: 'Synthetic restored answer' } }) });
+  const roomUrl = new URL(room.info.url), origin = roomUrl.origin;
+  const connect = token => new Promise((resolve, reject) => {
+    const socket = new WebSocket(origin.replace('http:', 'ws:') + '/?token=' + token, { origin, handshakeTimeout: 2000 });
+    socket.once('error', reject); socket.once('message', data => resolve({ socket, snapshot: JSON.parse(data) }));
+  });
+  let client;
+  try {
+    await assert.rejects(connect('synthetic-invalid-token'));
+    client = await connect(roomUrl.hash.slice(1));
+    assert.equal(client.snapshot.generation.quick, 'Synthetic restored answer');
+    await assert.rejects(connect(roomUrl.hash.slice(1)), 'only one phone may pair');
+    client.socket.send(JSON.stringify({ kind: 'ask', question: 'Synthetic phone question' }));
+    await new Promise((resolve, reject) => {
+      const deadline = Date.now() + 2000;
+      const check = () => asked ? resolve() : Date.now() >= deadline ? reject(new Error('phone request not delivered')) : setTimeout(check, 10);
+      check();
+    });
+    assert.equal(asked.question, 'Synthetic phone question');
+    assert.match(asked.id, /^phone-/);
+    const disconnected = new Promise(resolve => client.socket.once('close', resolve));
+    client.socket.close(); await disconnected;
+    await new Promise(resolve => setTimeout(resolve, 20));
+    client = await connect(roomUrl.hash.slice(1));
+    assert.equal(client.snapshot.generation.id, 'synthetic');
+  } finally { client?.socket.terminate(); room.stop(); }
+  assert.equal(closed, true);
+  console.log('Packaged phone pairing: token rejection, single client, questions and reconnect snapshot passed on loopback only');
   const mammoth = packaged('mammoth');
   const word = await mammoth.extractRawText({ buffer: fs.readFileSync(path.join(fixtureDirectory, 'synthetic.docx')) });
   assert.match(word.value, /Synthetic Word fixture/);

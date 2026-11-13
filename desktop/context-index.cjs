@@ -31,7 +31,7 @@ class ContextIndex {
       return { chunk, index, score };
     }).sort((a, b) => b.score - a.score || a.index - b.index);
     const selected = []; let characters = 0;
-    // Reserve one opening fragment per document before filling the remaining
+    // Reserve one relevant fragment per document before filling the remaining
     // budget by relevance, so a new résumé is not starved by old notes.
     const first = new Map();
     for (const item of ranked) if (!first.has(item.chunk.id)) first.set(item.chunk.id, item);

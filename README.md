@@ -7,7 +7,8 @@ runtime, with the editable extension under `desktop/`. Version: **0.5.0**.
 
 - Bounded local material selection, separate quick/deep context budgets, direct
   OpenAI-compatible SSE streaming for text, and non-thinking quick answers on
-  the official DeepSeek endpoint. No silent provider retries or model switching.
+  the official DeepSeek endpoint. The direct text route does not silently retry
+  or switch models; other provider protocols retain the upstream SDK behavior.
 - First-visible-text/idle timeouts, immediate cancellation even if a provider
   ignores abort, partial-column history, and animation-frame rendering.
 - Default system-audio capture with optional microphone: ScreenCaptureKit on

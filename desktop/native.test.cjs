@@ -10,7 +10,8 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-native-test-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const source = path.join(directory, 'fixture.txt');fs.writeFileSync(source, 'Invented local document for the import test.');
-  const handlers = new Map();let captured = 0, holdStream = false, speechReady = false, meetingId = null;
+  fs.writeFileSync(path.join(directory, 'studio-state.json'), JSON.stringify({ privacy: { enabled: true, selfTest: { version: 'synthetic-saved-version' } } }));
+  const handlers = new Map();let captured = 0, holdStream = false, failDeep = false, speechReady = false, meetingId = null;
   const starts = [];
   const sent = [];
   const window = { isDestroyed: () => false, show() {}, focus() {}, loadURL: async () => {}, webContents: { getURL: () => pathToFileURL(path.join(directory, 'desktop/index.html')).href, send: (...args) => sent.push(args) } };
@@ -22,6 +23,7 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const contexts = [];
   const llm = { streamChat: async function* (_question, _images, context, _system, options) {
     contexts.push(context);
+    if (failDeep && _system.includes('解释原理')) throw new Error('Synthetic deep-column failure');
     if (holdStream) await new Promise(resolve => options.signal.addEventListener('abort', resolve, { once: true }));
     yield 'Synthetic provider text';
   } };
@@ -42,6 +44,10 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const sender = { mainFrame: frame };
   const invoke = (name, data) => handlers.get('studio:' + name)({ senderFrame: frame, sender }, data);
   assert.equal((await invoke('status')).model, null);
+  assert.equal((await invoke('status')).privacy.selfTest.version, 'synthetic-saved-version');
+  assert.equal((await invoke('privacy-test', { client: 'feishu', version: '', capture: 'screen', result: 'passed' })).success, false);
+  assert.equal((await invoke('performance', { mode: 'invented' })).success, false);
+  await invoke('performance', { mode: 'balanced' }); assert.equal((await invoke('status')).performance.mode, 'balanced');
   assert.equal((await invoke('status')).captureSettings.captureMicrophone, false);
   assert.equal((await invoke('start')).success, false);
   assert.equal(starts.length, 0);
@@ -77,6 +83,12 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   assert.equal((await invoke('records'))[0].answers.quick, 'Synthetic provider text');
   assert.equal((await invoke('status')).generation.quick, 'Synthetic provider text');
   assert.equal((await invoke('status')).generation.running, false);
+  failDeep = true;
+  await invoke('ask', { id: 'partial-answer', task: 'interview', question: 'Synthetic dual question', dual: true });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await invoke('records'))[0].partial, true);
+  assert.equal((await invoke('records'))[0].answers.quick, 'Synthetic provider text');
+  failDeep = false;
   window.webContents.send('native-audio-transcript', { segmentId: 'synthetic-turn', speaker: 'them', text: 'Synthetic speech', final: true, timestamp: 1 });
   assert.equal((await invoke('status')).transcripts[0].text, 'Synthetic speech');
   holdStream = true;
