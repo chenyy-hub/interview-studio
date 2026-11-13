@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+upstream/
+release/
+node_modules/
+*.app/
+.env
+*.enc
+credentials.json
+studio-state.json

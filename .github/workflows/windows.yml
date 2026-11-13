@@ -1,0 +1,87 @@
+name: Windows Desktop Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout pinned upstream
+        uses: actions/checkout@v4
+        with:
+          repository: royisme/pikabaka
+          ref: ae66eb0c795a5653960ad4534a9e115e173af980
+          path: upstream
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+          cache-dependency-path: upstream/pnpm-lock.yaml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream/native-module
+      - name: Test desktop extension
+        shell: pwsh
+        run: |
+          $tests = Get-ChildItem desktop -Filter '*.test.cjs' | ForEach-Object FullName
+          node --test @tests
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python desktop/build_macos_test.py
+      - name: Install pinned dependencies
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+      - name: Compile original renderer
+        working-directory: upstream
+        run: pnpm run build:web:raw
+      - name: Compile original main process
+        working-directory: upstream
+        run: pnpm run build:electron:raw
+      - name: Compile Windows audio addon
+        working-directory: upstream
+        run: pnpm run build:native:raw
+      - name: Apply desktop extension
+        run: python desktop/prepare_windows.py upstream
+      - name: Package Windows installers
+        working-directory: upstream
+        run: pnpm exec electron-builder --win --x64 --publish never
+      - name: Verify packaged runtime
+        run: node desktop/check_windows_package.cjs upstream/release/win-unpacked
+      - name: Hash artifacts
+        shell: pwsh
+        run: |
+          Get-ChildItem upstream/release -Filter '*.exe' | ForEach-Object {
+            $hash = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($hash.Hash.ToLower())  $($_.Name)"
+          } | Set-Content upstream/release/SHA256SUMS.txt
+      - name: Keep installers and verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: InterviewStudio-Windows-x64
+          path: |
+            upstream/release/*.exe
+            upstream/release/SHA256SUMS.txt
+            upstream/release/windows-verification.json
+          retention-days: 14
+          if-no-files-found: error
