@@ -7,7 +7,7 @@ const { createVault } = require('./local-vault.cjs');
 const { attach } = require('./credential-session.cjs');
 function temp(t) { const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-vault-test-')); t.after(() => fs.rmSync(directory, { recursive: true, force: true })); return directory; }
 function manager(directory) {
-  const cm = { credentials: {}, init() { throw new Error('must not unlock keychain'); }, saveCredentials() { throw new Error('must not use upstream storage'); }, getStorageStatus() {}, writeCredentials() {} };
+  const cm = { credentials: {}, init() { throw new Error('must not unlock keychain'); }, saveCredentials() { throw new Error('must not use upstream storage'); }, getStorageStatus() {}, writeCredentials() {}, clearAll() { this.credentials = {}; this.scrubbed = true; } };
   attach(cm, { directory }); cm.init(); return cm;
 }
 test('saved endpoint, model, chat and speech keys survive a fresh manager with no keychain call', t => {
@@ -35,7 +35,8 @@ test('missing key and corrupted vault block writes and preserve the stored file'
 });
 test('explicit clearing removes local keys and a subsequent session starts without credentials', t => {
   const directory = temp(t), cm = manager(directory);
-  cm.credentials = { apiKey: 'synthetic-clear-secret' }; cm.saveCredentials(); cm.studioCredentialSession.clearLocal();
+  cm.credentials = { apiKey: 'synthetic-clear-secret' }; cm.saveCredentials(); cm.clearAll();
+  assert.equal(cm.scrubbed, false);
   assert.equal(fs.existsSync(path.join(directory, 'connections.enc')), false);
   assert.equal(fs.existsSync(path.join(directory, 'device.key')), false);
   assert.deepEqual(manager(directory).credentials, {});

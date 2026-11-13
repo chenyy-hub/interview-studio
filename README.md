@@ -1,9 +1,15 @@
 # Interview Studio
 
 Chinese desktop interview/meeting assistant, based on the pinned Pika 3.4.0
-runtime, with the editable extension under `desktop/`. Version: **0.5.0**.
+runtime, with the editable extension under `desktop/`. Version: **0.6.0**.
 
 ## This update
+
+- Six everyday navigation entries and one setup page. Advanced audio, speed,
+  privacy and diagnostics are collapsed; the session source chooser opens
+  before audio starts. Screenshot-and-ask is one explicit user action.
+- Account-local API persistence: save endpoint, model and chat/speech keys once,
+  restore automatically on startup, with explicit clear and legacy import.
 
 - Bounded local material selection, separate quick/deep context budgets, direct
   OpenAI-compatible SSE streaming for text, and non-thinking quick answers on
@@ -49,8 +55,14 @@ The adapter requires the official Pika 3.4.0 arm64 runtime, preserves its native
 modules and ASAR integrity, validates helper names and signs the local derivative.
 The output directory must not exist. This build is not notarized.
 
-API credentials default to process memory only. Existing encrypted credentials
-are loaded only after an explicit user action. Application records are local.
+API credentials are saved in an AES-256-GCM file in the app user-data private
+directory and restored without keychain prompts. Its random key is stored in
+the same account directory (0700 directory / 0600 files on Unix). This protects
+against casual plaintext exposure, not programs or administrators with access
+to that account. It is not equivalent to OS-keychain storage. Corrupt or
+missing-key vaults block writes rather than overwrite saved data. Legacy OS
+encrypted credentials are imported only after an explicit user action.
+Application records and credentials are never included in this repository.
 
 See `ASSESSMENT.md` for the GitHub alternatives review, and
 `desktop/FEATURES.md` for the earlier feature comparison and remaining gaps.
@@ -63,3 +75,7 @@ https://github.com/royisme/pikabaka/tree/v3.4.0
 This repository contains the derivative extension and reproducible build
 adapter. The corresponding upstream source is pinned, fetched and built by the
 Windows workflow. It is not an official Pika or Interview Genie release.
+
+The reviewed Interview Genie documentation and remaining gaps are in
+`GENIE_FEATURES_V06.md`. Windows build results are tracked in the private
+repository Actions, not inferred from local configuration checks.

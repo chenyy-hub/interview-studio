@@ -73,6 +73,6 @@ https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectio
 结果以 workflow 和 `windows-verification.json` 为准。没有真实设备测试前，
 不把 Windows 的音频或会议共享兼容性标为通过。
 
-当前状态：本地构建工程已准备；向私有 GitHub 仓库上传源码的自动审批被拒绝，
-需用户明确授权目标仓库及源码上传后，才能启动云端 Windows 构建。
-尚未生成、下载或验证 Windows EXE。
+当前状态：用户已明确授权上传，工程已推送至私有仓库
+https://github.com/chenyy-hub/interview-studio 。已启动 Windows 原生构建，
+实际成功与否以 Actions 和打包启动检查为准。

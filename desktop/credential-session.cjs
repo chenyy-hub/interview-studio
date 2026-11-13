@@ -8,6 +8,7 @@ function attach(manager, { directory } = {}) {
   const save = manager.saveCredentials.bind(manager);
   const storageStatus = manager.getStorageStatus.bind(manager);
   const write = manager.writeCredentials.bind(manager);
+  const clearAll = manager.clearAll?.bind(manager);
   const vault = directory ? require('./local-vault.cjs').createVault(directory) : null;
   let localError = '';
   let encrypted = false;
@@ -77,6 +78,7 @@ function attach(manager, { directory } = {}) {
       }
     },
   };
+  if (vault && clearAll) manager.clearAll = () => { clearAll(); session.clearLocal(); };
   Object.defineProperty(manager, 'studioCredentialSession', { value: session });
   return session;
 }
