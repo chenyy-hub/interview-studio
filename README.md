@@ -1,9 +1,19 @@
 # Interview Studio
 
 Chinese desktop interview/meeting assistant, based on the pinned Pika 3.4.0
-runtime, with the editable extension under `desktop/`. Version: **0.6.0**.
+runtime, with the editable extension under `desktop/`. Version: **0.7.0**.
 
 ## This update
+
+- Saved interview preparation: company, role, job description, selected resume,
+  answer language/style and programming language. One language setting applies
+  to the workbench prompts instead of conflicting controls.
+- Selected resumes up to 4,000 characters are included whole; longer documents
+  stay within retrieval budgets. Visible context ranges can be previewed, with
+  content-version checks that reject stale previews. These are supplied inputs,
+  not claims that a model cited or verified a document.
+- Resume import is one action, duplicate text is reused, and removed resumes
+  clear the selection. Full chat-completions URLs normalize to API base URLs.
 
 - Six everyday navigation entries and one setup page. Advanced audio, speed,
   privacy and diagnostics are collapsed; the session source chooser opens

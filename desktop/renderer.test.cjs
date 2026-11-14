@@ -56,7 +56,7 @@ test('Chinese connection form saves to the native registry without a model call 
   await new Promise(resolve => setImmediate(resolve));
   await element('#settings').onclick();
   assert.match(element('#other').innerHTML, /回答模型/);
-  element('#connection-key').value = 'synthetic-test-key'; element('#answer-language').value = 'Chinese'; element('#connection-url').value = 'https://api.deepseek.com/v1/chat/completions';
+  element('#connection-key').value = 'synthetic-test-key'; element('#connection-url').value = 'https://api.deepseek.com/v1/chat/completions';
   await element('#save-connection').onclick();
   assert.equal(calls[0][1].apiKey, 'synthetic-test-key');
   assert.equal(calls[0][1].baseUrl, 'https://api.deepseek.com/v1');

@@ -46,11 +46,12 @@ function install(appState) {
       const mode = options?.mode || store.performance.mode;
       const combined = context?.startsWith('[STUDIO_CONTEXT]') ? context : contextIndex.select(question || '', mode === 'fast' ? 6000 : 18000, store.preparation).text + preparationContext(store.preparation) + '\n\n' + (context || '').slice(-6000);
       const use = cm.resolveModelUse('chat');
+      const effectiveSystem = (system || '根据真实背景简明回答，不编造个人经历。') + (store.preparation.language === 'English' ? '\nWrite the final answer in English.' : '\n最终使用中文回答。');
       if ('connection' in use && use.connection.type === 'openai' && !images?.length) {
         yield* streamOpenAI({ connection: use.connection, model: use.model, question, context: combined,
-          system: system || (store.preparation.language === 'English' ? 'Answer briefly in English using only true personal background.' : '根据真实背景用中文简明回答，不编造个人经历。'), signal: options?.signal,
+          system: effectiveSystem, signal: options?.signal,
           column: options?.column || 'quick', mode, onStage: options?.onStage });
-      } else yield* upstreamStream(question, images, combined, system, { ...options, verbatimPrompt: true });
+      } else yield* upstreamStream(question, images, combined, effectiveSystem, { ...options, verbatimPrompt: true });
     };
   }
   const write = () => {
