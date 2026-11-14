@@ -42,13 +42,24 @@ function createFloating({ app, appState, globalShortcut, onChange = () => {} }) 
       } catch { failed.add(id); }
     }
   };
-  const originalMode = helper.setWindowMode?.bind(helper);
-  if (originalMode) helper.setWindowMode = (next,inactive) => {
-    if (next !== 'overlay') setPassthrough(false);
-    originalMode(next,inactive);
+  const afterMode = next => {
     if (next === 'overlay' && collapsed) resize(true);
     refreshShortcuts(); emit();
   };
+  const hasDirectModes = typeof helper.switchToOverlay === 'function' && typeof helper.switchToLauncher === 'function';
+  if (hasDirectModes) {
+    for (const [method,next] of [['switchToOverlay','overlay'],['switchToLauncher','launcher']]) {
+      const original = helper[method].bind(helper);
+      helper[method] = (...args) => { if (next !== 'overlay') setPassthrough(false); original(...args); afterMode(next); };
+    }
+  } else if (helper.setWindowMode) {
+    const originalMode = helper.setWindowMode.bind(helper);
+    helper.setWindowMode = (next,inactive) => {
+    if (next !== 'overlay') setPassthrough(false);
+    originalMode(next,inactive);
+    afterMode(next);
+    };
+  }
   function run(data) {
     const win = overlay();
     if (!['open','main','hide','collapse','passthrough'].includes(data?.action)) throw new Error('悬浮窗操作无效');

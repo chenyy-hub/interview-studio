@@ -78,7 +78,7 @@ bridge.onEvent(data=>{
   if(data.kind==='shortcut' && shortcuts[data.action]) {void action(shortcuts[data.action])();return;}
   if(data.kind==='transcript') {state.transcripts.set(data.segment.segmentId,data.segment);transcript();$('#partial-transcript').textContent='';return;}
   if(data.kind==='reset') {state.transcripts.clear();transcript();return;}
-  if(data.kind==='started') {state.request=data.id;state.quick='';state.deep='';state.first={};state.lastQuestion=data.question;paint();return;}
+  if(data.kind==='started') {state.request=data.id;state.quick='';state.deep='';state.first={};state.lastQuestion=data.question;$('#dual-answer').checked=!!data.dual;paint();return;}
   if(data.id && data.id!==state.request) return;
   if(data.kind==='token') {state[data.column]+=data.text;schedulePaint();}
   if(data.kind==='first') {state.first[data.column]=data.ms;schedulePaint();}

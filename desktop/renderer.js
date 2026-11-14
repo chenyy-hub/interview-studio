@@ -321,7 +321,7 @@ studio.onEvent(data => {
   }
   if (data.kind === 'transcript') { state.transcripts.set(data.segment.segmentId, data.segment); renderTurns(); $('#partial').textContent = ''; return; }
   if (data.kind === 'reset') { state.transcripts.clear(); renderTurns(); return; }
-  if (data.kind === 'started' && (!state.request || data.id === state.request)) renderSources(data.sources);
+  if (data.kind === 'started' && (!state.request || data.id === state.request)) { renderSources(data.sources); $('#dual').checked = !!data.dual; $('#dual').onchange(); }
   if (data.kind === 'started' && !state.request) { state.request = data.id; state.quick = ''; state.deep = ''; $('#quick').textContent = ''; $('#deep').textContent = ''; $('#question-title').textContent = data.question; $('#ask').disabled = true; }
   if (data.id && data.id !== state.request) return;
   if (data.kind === 'token') { state[data.column] += data.text; scheduleAnswerPaint(); }
