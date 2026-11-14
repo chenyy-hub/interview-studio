@@ -45,6 +45,13 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const invoke = (name, data) => handlers.get('studio:' + name)({ senderFrame: frame, sender }, data);
   assert.equal((await invoke('status')).model, null);
   assert.equal((await invoke('status')).preparation.language, 'Chinese');
+  assert.equal((await invoke('status')).appearance.theme, 'light');
+  assert.equal((await invoke('appearance', { theme: 'dark', overlayOpacity: -0.1 })).success, false);
+  assert.equal((await invoke('appearance', { theme: 'dark', overlayOpacity: 0.65 })).success, true);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(directory, 'studio-state.json'))).appearance, { theme: 'dark', overlayOpacity: 0.65, overlayTextOpacity: 1, overlayFontSize: 15 });
+  assert.equal((await handlers.get('set-overlay-opacity')({ senderFrame: frame, sender }, 0.55)).success, true);
+  assert.equal((await invoke('status')).appearance.overlayOpacity, 0.55);
+  assert.equal((await handlers.get('set-overlay-opacity')({ senderFrame: { url: 'https://untrusted.example' }, sender }, 0.9)).success, false);
   assert.equal((await invoke('preparation', { language: 'unknown' })).success, false);
   assert.equal((await invoke('preparation', { resumeDocumentId: 'missing' })).success, false);
   assert.equal((await invoke('status')).privacy.selfTest.version, 'synthetic-saved-version');

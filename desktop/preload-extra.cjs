@@ -2,7 +2,7 @@
 const studioElectron = require('electron');
 studioElectron.contextBridge.exposeInMainWorld('studio', {
   invoke: (name, data) => {
-    const allowed = ['status','start','audio-devices','audio-preferences','performance','preparation','document-text','privacy','privacy-test','hide','credentials-enable','credentials-clear','preferences','capture','ask','cancel','import','documents','export','records','pair-start','pair-stop','original','settings'];
+    const allowed = ['status','start','audio-devices','audio-preferences','performance','appearance','floating','preparation','document-text','privacy','privacy-test','hide','credentials-enable','credentials-clear','preferences','capture','ask','cancel','import','documents','export','records','pair-start','pair-stop','original','settings'];
     if (!allowed.includes(name)) return Promise.reject(new Error('Unsupported action'));
     return studioElectron.ipcRenderer.invoke('studio:' + name, data);
   },

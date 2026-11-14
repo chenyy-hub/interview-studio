@@ -1,9 +1,20 @@
 # Interview Studio
 
 Chinese desktop interview/meeting assistant, based on the pinned Pika 3.4.0
-runtime, with the editable extension under `desktop/`. Version: **0.7.0**.
+runtime, with the editable extension under `desktop/`. Version: **0.8.0**.
 
 ## This update
+
+- Native Windows title bar and desktop-fit sizing, with real packaged window
+  maximize/restore, minimize and close checks before installer compression.
+- Warm-white and charcoal palettes, simple provider presets and a Chinese
+  floating interface sharing the same transcript, answer stream and history.
+- Independently saved floating background (0–100%), text (15–100%) and font size;
+  transparent-text preset, collapse, drag/resize, click-through and tray recovery.
+- Global floating/quick-answer/screenshot/scroll shortcuts with conflict status.
+  Upstream mode changes now release only their own shortcuts, preserving recovery.
+- Soniox v6, Chinese and other provider defaults are prefilled; streaming versus
+  chunked-upload and short-request billing differences are explained in settings.
 
 - Saved interview preparation: company, role, job description, selected resume,
   answer language/style and programming language. One language setting applies

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PRODUCT = "InterviewStudio"
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 
 def replace_once(text, old, new):
     if text.count(old) != 1:
@@ -15,7 +15,7 @@ def runtime_payload(read):
         raise RuntimeError('This adapter targets the Pika 3.4.0 release only')
     package.update(name='interview-studio', version=VERSION, main='desktop/bootstrap.cjs', productName=PRODUCT)
     additions = {'package.json': json.dumps(package, ensure_ascii=False, indent=2).encode()}
-    for filename in ['bootstrap.cjs','credential-session.cjs','local-vault.cjs','service-readiness.cjs','audio-devices.cjs','native.cjs','answer-engine.cjs','context-index.cjs','preparation.cjs','fast-stream.cjs','privacy-controller.cjs','index.html','renderer.js','studio.css','remote.html']:
+    for filename in ['bootstrap.cjs','credential-session.cjs','local-vault.cjs','service-readiness.cjs','audio-devices.cjs','native.cjs','answer-engine.cjs','context-index.cjs','preparation.cjs','fast-stream.cjs','privacy-controller.cjs','appearance.cjs','floating.cjs','window-smoke.cjs','index.html','renderer.js','studio.css','overlay.html','overlay.js','overlay.css','remote.html']:
         additions['desktop/' + filename] = (ROOT / 'desktop' / filename).read_bytes()
     original_preload = read('dist-electron/electron/preload.js')
     additions['desktop/preload.cjs'] = (original_preload + '\n' + (ROOT / 'desktop/preload-extra.cjs').read_text()).encode()
@@ -24,9 +24,37 @@ def runtime_payload(read):
     if window.count(old_preload) != 2:
         raise RuntimeError('Unexpected preload configuration')
     window = window.replace(old_preload, 'node_path_1.default.join(electron_1.app.getAppPath(), "desktop/preload.cjs")')
+    # Windows needs the operating system's title bar in every launcher view.
+    # The upstream React window controls are absent in our Chinese workbench.
+    window = replace_once(window, '{ frame: false, titleBarOverlay: false, autoHideMenuBar: true }', '{ frame: true, autoHideMenuBar: true }')
+    window = replace_once(window, 'const width = 1200;', 'const width = Math.min(1200, Math.max(380, workArea.width - 32));')
+    window = replace_once(window, 'const height = 800;', 'const height = Math.min(800, Math.max(320, workArea.height - 48));')
+    window = replace_once(window, 'minWidth: 600,', 'minWidth: Math.min(600, width),')
+    window = replace_once(window, 'minHeight: 400,', 'minHeight: Math.min(400, height),')
+    window = replace_once(window, 'const y = Math.round(workArea.x + topMargin);', 'const y = Math.round(workArea.y + Math.min(topMargin, Math.max(0, workArea.height - height)));')
     window = replace_once(window, 'this.launcherWindow.loadURL(`${startUrl}?window=launcher`)', 'this.launcherWindow.loadURL(require("node:url").pathToFileURL(node_path_1.default.join(electron_1.app.getAppPath(), "desktop/index.html")).href)')
+    window = replace_once(window, 'this.overlayWindow.loadURL(`${startUrl}?window=overlay`)', 'this.overlayWindow.loadURL(require("node:url").pathToFileURL(node_path_1.default.join(electron_1.app.getAppPath(), "desktop/overlay.html")).href)')
+    window = replace_once(window, 'minHeight: 362,', 'minHeight: 44,')
     window = replace_once(window, "this.overlayWindow.on('close', (e) => {", "this.overlayWindow.on('close', (e) => {\n                if (this.appState.isQuitting()) return;")
     additions['dist-electron/electron/helpers/WindowHelper.js'] = window.encode()
+    keybinds = read('dist-electron/electron/services/KeybindManager.js')
+    keybinds = replace_once(keybinds, 'electron_1.globalShortcut.unregisterAll();', '''this.studioRegisteredAccelerators ||= new Set();
+        for (const accelerator of this.studioRegisteredAccelerators) electron_1.globalShortcut.unregister(accelerator);
+        this.studioRegisteredAccelerators.clear();''')
+    keybinds = replace_once(keybinds, '''return electron_1.globalShortcut.register(accelerator, () => {
+                this.onShortcutTriggeredCallbacks.forEach(cb => cb(kb.id));
+            });''', '''const registered = electron_1.globalShortcut.register(accelerator, () => {
+                this.onShortcutTriggeredCallbacks.forEach(cb => cb(kb.id));
+            });
+            if (registered) (this.studioRegisteredAccelerators ||= new Set()).add(accelerator);
+            return registered;''')
+    keybinds = replace_once(keybinds, 'electron_1.globalShortcut.unregister(oldAccelerator);', 'electron_1.globalShortcut.unregister(oldAccelerator);\n            this.studioRegisteredAccelerators?.delete(oldAccelerator);')
+    additions['dist-electron/electron/services/KeybindManager.js'] = keybinds.encode()
+    tray = read('dist-electron/electron/lib/tray-menu.js')
+    tray = replace_once(tray, 'const contextMenu = electron_1.Menu.buildFromTemplate([', '''const contextMenu = electron_1.Menu.buildFromTemplate([
+        { label: '恢复鼠标点击', click: () => { appState.setOverlayMousePassthrough(false); appState.windowHelper.getOverlayWindow()?.showInactive(); } },''')
+    tray = tray.replace("setToolTip('Pika')", "setToolTip('面试工作室')").replace("label: 'Show Pika'", "label: '打开面试工作室'").replace("label: 'Take Screenshot'", "label: '截取屏幕'").replace("label: 'Quit'", "label: '退出'")
+    additions['dist-electron/electron/lib/tray-menu.js'] = tray.encode()
     main = read('dist-electron/electron/main.js')
     main = replace_once(main, "if (!(await (0, logging_1.ensureMacMicrophoneAccess)('meeting start'))) {", "this.studioCaptureMicrophone = metadata?.audio?.captureMicrophone === true;\n        if (this.studioCaptureMicrophone && !(await (0, logging_1.ensureMacMicrophoneAccess)('meeting start'))) {")
     for call in ['this.microphoneCapture?.start();', 'this.googleSTT_User?.start();']:

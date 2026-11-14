@@ -4,6 +4,44 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 
+test('recommended speech preset saves the real provider settings; appearance leaves unfinished keys intact', async () => {
+  const elements = new Map(), calls = [];
+  const element = selector => {
+    if (!elements.has(selector)) elements.set(selector, { value: '', innerHTML: '', style: {}, classList: { toggle() {} }, querySelectorAll: () => [], addEventListener() {} });
+    return elements.get(selector);
+  };
+  const status = { speech: { configured: false, language: 'chinese' }, appearance: { theme: 'light', overlayOpacity: 0.88 }, transcripts: [], permissions: {}, metrics: [] };
+  const credentials = { sttProvider: 'google', sttModels: {} };
+  const native = { onNativeAudioTranscript() {}, onMeetingStateChanged() {}, onSessionReset() {}, onGlobalShortcut() {},
+    aiConnectionsList: async () => [], chatModelGet: async () => ({}), getStoredCredentials: async () => credentials,
+    setSonioxApiKey: async key => { calls.push(['key', key]); credentials.hasSonioxKey = true; return { success: true }; },
+    setSttProvider: async provider => { calls.push(['provider', provider]); credentials.sttProvider = provider; return { success: true }; },
+    setSttModel: async (provider, model) => { calls.push(['model', provider, model]); credentials.sttModels[provider] = model; return { success: true }; },
+    setRecognitionLanguage: async (language, speaker) => { calls.push(['language', language, speaker]); return { success: true }; },
+    setWindowMode: async mode => { calls.push(['window-mode', mode]); return { success: true }; },
+    modelTest: () => assert.fail('Configuring speech must not call the answer model') };
+  const context = { document: { querySelector: element, querySelectorAll: () => [], documentElement: { dataset: {} } }, electronAPI: native, addEventListener() {} };
+  context.window = context; context.studio = { onEvent() {}, invoke: async (name, data) => {
+    if (name === 'appearance') { calls.push(['appearance', data.theme, data.overlayOpacity]); status.appearance = data; return { success: true }; }
+    assert.equal(name, 'status'); return status;
+  } };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8'), context);
+  await new Promise(resolve => setImmediate(resolve));
+  await element('#settings').onclick();
+  element('#speech-key').value = 'synthetic-soniox-key';
+  await element('#save-speech-provider').onclick();
+  assert.deepEqual(calls.slice(0, 5), [['key', 'synthetic-soniox-key'], ['provider', 'soniox'], ['model', 'soniox', 'stt-rt-v6'], ['language', 'chinese', 'them'], ['language', 'chinese', 'user']]);
+  assert.equal(element('#speech-key').value, '');
+  element('#connection-key').value = 'unfinished-synthetic-answer-key';
+  element('#appearance-theme').value = 'dark'; element('#overlay-opacity').value = '65';
+  await element('#overlay-opacity').onchange();
+  assert.deepEqual(calls.at(-1), ['appearance', 'dark', 0.65]);
+  assert.equal(context.document.documentElement.dataset.theme, 'dark');
+  assert.equal(element('#connection-key').value, 'unfinished-synthetic-answer-key');
+  await element('#preview-overlay').onclick();
+  assert.deepEqual(calls.at(-1), ['window-mode', 'overlay']);
+});
+
 test('renderer boots with the non-configurable contextBridge global and navigation responds', async () => {
   const elements = new Map();
   const element = selector => {
@@ -56,6 +94,9 @@ test('Chinese connection form saves to the native registry without a model call 
   await new Promise(resolve => setImmediate(resolve));
   await element('#settings').onclick();
   assert.match(element('#other').innerHTML, /回答模型/);
+  assert.equal(element('#speech-provider').value, 'soniox');
+  assert.equal(element('#speech-model').value, 'stt-rt-v6');
+  assert.equal(element('#speech-language').value, 'chinese');
   element('#connection-key').value = 'synthetic-test-key'; element('#connection-url').value = 'https://api.deepseek.com/v1/chat/completions';
   await element('#save-connection').onclick();
   assert.equal(calls[0][1].apiKey, 'synthetic-test-key');

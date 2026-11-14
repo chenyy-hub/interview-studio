@@ -17,14 +17,21 @@ function scheduleAnswerPaint() {
 async function call(name, data) { const result = await studio.invoke(name, data); if (result?.success === false) throw new Error(result.error); return result; }
 function checked(result) { if (result?.success === false) throw new Error(result.error || '操作失败'); return result; }
 function openSection(section) { return call('settings', { section }); }
+function applyAppearance(value = {}) {
+  if (document.documentElement?.dataset) document.documentElement.dataset.theme = value.theme || 'light';
+}
 async function refresh(restore = false) {
   state.status = await call('status');
   const s = state.status;
+  applyAppearance(s.appearance);
+  document.body?.classList?.add('platform-' + s.platform);
   const prep = s.preparation || {};
   $('#preparation-summary').textContent = [prep.company, prep.role, prep.language === 'English' ? '英文回答' : '中文回答'].filter(Boolean).join(' · ');
   $('#status').textContent = `${s.sessionActive ? '面试进行中' : '当前未采音'}  ·  ${s.model ? '回答：' + s.model.model : '回答 API 待配置'}  ·  ${s.speech?.configured ? '语音已配置' : '语音转写待配置'}`;
   $('#start').disabled = s.sessionActive;
   $('#stop').disabled = !s.sessionActive;
+  $('#stop').hidden = !s.sessionActive;
+  if ($('#status').dataset) $('#status').dataset.active = String(s.sessionActive);
   $('#credential-status').textContent = s.credentialStorage?.error || (s.credentialStorage?.mode === 'local' ? 'API 配置保存在本机，下次打开自动使用。' : s.credentialStorage?.mode === 'encrypted' ? 'API Key：系统加密保存已启用' : 'API Key：仅本次使用，退出后不保存。');
   if (restore) {
     state.transcripts = new Map((s.transcripts || []).map(t => [t.segmentId || `${t.speaker}-${t.timestamp}`, t]));
@@ -145,7 +152,12 @@ async function renderConnections() {
   const [connections, use, credentials] = await Promise.all([native.aiConnectionsList(), native.chatModelGet(), native.getStoredCredentials()]);
   const compatible = connections.filter(c => c.type === 'openai');
   const selected = compatible.find(c => c.id === use.connectionId);
-  $('#other').innerHTML = `<h1>设置</h1><p>第一次填写后保存即可，下次打开自动使用。只用文字问答时，只需配置回答模型。</p><div class="box"><h2>回答模型 API</h2><label>服务<select id="answer-preset"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">自定义兼容接口</option></select></label><input id="connection-name" type="hidden" value="DeepSeek"><label>API 地址<input id="connection-url" value="https://api.deepseek.com" spellcheck="false" autocomplete="off"></label><label>API Key<input id="connection-key" type="password" autocomplete="off" placeholder="填写一次，保存在此电脑"></label><label>模型名称<input id="connection-model" value="deepseek-flash" spellcheck="false" autocomplete="off"></label><details><summary>管理其他连接</summary><label>已有连接<select id="connection-id"><option value="">新建连接</option>${compatible.map(c => `<option value="${escapeText(c.id)}">${escapeText(c.name)}</option>`).join('')}</select></label><button id="advanced-models">其他模型协议</button></details><div class="row"><button id="save-connection" class="primary">保存 API 配置</button><button id="test-connection">测试连接（会调用模型）</button></div><p>Key 不回显。留空可沿用已保存的 Key；更换服务时需填写对应 Key。</p></div><details class="box" ${state.status.speech?.configured ? '' : 'open'}><summary>语音转写 ${state.status.speech?.configured ? '· 已配置' : '· 实时听题需要'}</summary><p>语音服务把电脑声音转为文字，与回答 API 分别配置。</p><label>语音服务<select id="speech-provider"><option value="">请选择语音服务</option><option value="deepgram">Deepgram</option><option value="groq">Groq Whisper</option><option value="openai">OpenAI 语音转写</option><option value="google">Google Cloud（高级配置）</option></select></label><label>语音 API Key<input id="speech-key" type="password" autocomplete="off" placeholder="填写此语音服务的 Key"></label><details><summary>识别模型与语言</summary><label>识别模型（留空使用默认）<input id="speech-model" spellcheck="false" autocomplete="off"></label><label>识别语言<select id="speech-language"><option value="chinese">中文</option><option value="english-us">English (US)</option></select></label><button id="advanced-speech">其他语音服务 / Google 文件</button></details><div class="row"><button id="save-speech-provider" class="primary">保存语音配置</button><button id="capture-settings">更多音频选项</button></div></details><details class="box"><summary>高级设置</summary><p>系统声音、手动快答和单栏回答已设为默认，日常使用无需调整。</p><div class="settings-links"><button data-settings-view="setup">音频设备与术语</button><button data-settings-view="performance">回复速度</button><button data-settings-view="privacy">窗口与共享保护</button><button data-settings-view="diagnostics">连接与错误诊断</button></div></details><details class="box"><summary>本机配置与清除</summary><p>API 地址、模型和 Key 保存在本机用户目录的加密文件中。加密密钥也在该目录，同一系统账户下的程序可以读取；不等同于系统钥匙串保护。保存配置不会自动调用模型。</p><button id="clear-credentials">清除此电脑保存的 API 配置</button><button id="legacy-credentials">导入旧系统加密凭证</button></details>`;
+  $('#other').innerHTML = `<div class="settings-head"><div><div class="step-label">按你的习惯，准备好就出发</div><h1>设置</h1><p>文字提问只需配置回答模型；实时听题再填语音 Key。其他参数已经预填。</p></div></div>
+<div class="setup-grid"><div class="box"><div class="step-label">01 · 生成回答</div><h2>回答模型</h2><p>负责生成面试回答，和语音转写分别计费。</p><label>服务<select id="answer-preset"><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="custom">自定义兼容接口</option></select></label><input id="connection-name" type="hidden" value="DeepSeek"><label>API Key<input id="connection-key" type="password" autocomplete="off" placeholder="填写一次，保存在此电脑"></label><details id="api-advanced"><summary>地址与模型 · 已预填，可按服务商修改</summary><label>API 地址<input id="connection-url" value="https://api.deepseek.com" spellcheck="false" autocomplete="off"></label><label>模型名称<input id="connection-model" value="deepseek-flash" spellcheck="false" autocomplete="off"></label></details><details><summary>管理其他连接</summary><label>已有连接<select id="connection-id"><option value="">新建连接</option>${compatible.map(c => `<option value="${escapeText(c.id)}">${escapeText(c.name)}</option>`).join('')}</select></label><button id="advanced-models">其他模型协议</button></details><div class="row"><button id="save-connection" class="primary">保存回答配置</button><button id="test-connection">测试连接</button></div><p>保存不调用模型；测试会发起一次模型请求。Key 留空可沿用已保存的值。</p></div>
+<div class="box"><div class="step-label">02 · 实时听题</div><h2>语音转写</h2><p>建议先试 Soniox，模型和中文语言已预填。</p><label>语音服务<select id="speech-provider"><option value="soniox">Soniox · 中文实时优先试</option><option value="deepgram">Deepgram · 流式备选</option><option value="groq">Groq Whisper · 低标价，分段返回</option><option value="openai">OpenAI 语音转写</option><option value="google">Google Cloud · 高级配置</option>${!['soniox','deepgram','groq','openai','google'].includes(credentials.sttProvider) && state.status.speech?.configured ? `<option value="${escapeText(credentials.sttProvider)}">已保存的 ${escapeText(credentials.sttProvider)} · 高级配置</option>` : ''}</select></label><div id="speech-guidance" class="provider-note" role="status"></div><label>语音 API Key<input id="speech-key" type="password" autocomplete="off" placeholder="填写此语音服务的 Key"></label><details><summary>识别参数 · 已预填</summary><label>识别模型<input id="speech-model" spellcheck="false" autocomplete="off"></label><label>识别语言<select id="speech-language"><option value="chinese">中文</option><option value="auto">自动识别 / 多语言</option><option value="english-us">English (US)</option></select></label><button id="advanced-speech">其他语音服务 / Google 文件</button></details><div class="row"><button id="save-speech-provider" class="primary">保存语音配置</button><button id="capture-settings">音频选项</button></div><p class="provider-reference">价格参考：2026-11-14 官方按量价，美元；真实费用取决于音频时长、短请求计费和双路采音。</p></div></div>
+<div class="setup-tip">推荐起步：系统声音 + 中文 + 单栏快答。飞书、腾讯会议继续使用原设备；只听对方时保持麦克风关闭。无需调整采样率或音频后端。</div>
+<div class="box"><div class="step-label">03 · 用得更舒服</div><h2>外观与悬浮窗</h2><div class="appearance-grid"><div><label>界面配色<select id="appearance-theme"><option value="light">暖白 · 默认</option><option value="dark">炭灰 · 深色</option></select></label><p>主界面和悬浮窗同步配色，自动保存在本机。</p><div class="row"><button id="preview-overlay">打开悬浮窗</button><button id="main-ghost-preset">纯透明淡字</button></div></div><div><label class="range-head" for="overlay-opacity">悬浮窗背景不透明度 <output id="opacity-value" for="overlay-opacity">88%</output></label><input id="overlay-opacity" type="range" min="0" max="100" step="1" aria-label="悬浮窗背景不透明度"><p>0% 完全透明，100% 更实。背景和文字分别调节，松开滑块自动保存。</p><label class="range-head" for="overlay-text-opacity">文字不透明度 <output id="text-opacity-value" for="overlay-text-opacity">100%</output></label><input id="overlay-text-opacity" type="range" min="15" max="100" step="1" aria-label="悬浮窗文字不透明度"><label>文字大小<select id="overlay-font-size"><option value="12">12 px</option><option value="13">13 px</option><option value="14">14 px</option><option value="15">15 px</option><option value="16">16 px</option><option value="17">17 px</option><option value="18">18 px</option><option value="19">19 px</option><option value="20">20 px</option><option value="21">21 px</option><option value="22">22 px</option><option value="23">23 px</option><option value="24">24 px</option></select></label><div class="opacity-sample"><span id="opacity-preview">预览 · 背景透明，文字独立显示</span></div></div></div></div>
+<details class="box"><summary>高级设置</summary><p>日常使用可以保持默认；需要时再调整。</p><div class="settings-links"><button data-settings-view="setup">音频设备与术语</button><button data-settings-view="performance">回复速度</button><button data-settings-view="privacy">窗口与共享保护</button><button data-settings-view="diagnostics">连接与错误诊断</button></div></details><details class="box"><summary>本机配置与清除</summary><p>API 地址、模型和 Key 保存在本机用户目录的加密文件中。加密密钥也在该目录，同一系统账户下的程序可以读取；不等同于系统钥匙串保护。</p><button id="clear-credentials">清除此电脑保存的 API 配置</button><button id="legacy-credentials">导入旧系统加密凭证</button></details>`;
   document.querySelectorAll('[data-settings-view]').forEach(button => button.onclick = action(() => selectView(button.dataset.settingsView)));
   $('#clear-credentials').onclick = action(async () => { if (!window.confirm('清除本机保存的模型与语音 API 配置？下次使用需重新填写。简历和记录会保留。')) return; await call('credentials-clear'); await renderConnections(); message('本机 API 配置已清除。'); });
   $('#legacy-credentials').onclick = action(async () => { await call('credentials-enable'); await renderConnections(); message('旧凭证已导入本机配置。'); });
@@ -177,14 +189,31 @@ async function renderConnections() {
     await renderConnections(); message('API 配置已保存在本机，下次打开自动使用。尚未测试连接。');
   });
   $('#test-connection').onclick = action(async () => { const current = await native.chatModelGet(); if (!current.connectionId || !current.model) throw new Error('请先应用回答配置'); message('正在测试回答模型…'); checked(await native.modelTest({ job: 'chat', ...current })); message('回答模型连接测试通过。'); });
-  $('#speech-provider').value = ['deepgram','groq','openai'].includes(credentials.sttProvider) || state.status.speech?.configured ? credentials.sttProvider : '';
-  const keyFlags = { deepgram: 'hasDeepgramKey', groq: 'hasSttGroqKey', openai: 'hasSttOpenaiKey' };
-  function fillSpeech() { const provider = $('#speech-provider').value; $('#speech-key').value = ''; $('#speech-key').placeholder = credentials[keyFlags[provider]] ? '已填写，留空沿用；不回显 Key' : '填写此语音服务的 API Key'; $('#speech-model').value = provider === 'groq' ? credentials.groqSttModel || '' : credentials.sttModels?.[provider] || ''; }
+  $('#api-advanced').open = $('#answer-preset').value !== 'deepseek';
+  const presetChanged = $('#answer-preset').onchange;
+  $('#answer-preset').onchange = () => { presetChanged(); $('#api-advanced').open = true; };
+  $('#speech-provider').value = ['soniox','deepgram','groq','openai'].includes(credentials.sttProvider) || state.status.speech?.configured ? credentials.sttProvider : 'soniox';
+  const keyFlags = { soniox: 'hasSonioxKey', deepgram: 'hasDeepgramKey', groq: 'hasSttGroqKey', openai: 'hasSttOpenaiKey' };
+  const speechPresets = {
+    soniox: { model: 'stt-rt-v6', note: '<strong>中文实时听题，优先试这个。</strong><br>官方参考约 $0.12/小时，按 token 计费；适合中英混合。需要 Soniox 自己的 Key。准确性仍需用你的录音确认。' },
+    deepgram: { model: 'nova-3', note: '<strong>实时流式备选。</strong><br>Nova-3 支持中文，单语参考约 $0.46/小时，多语约 $0.55/小时。需要 Deepgram Key。' },
+    groq: { model: 'whisper-large-v3-turbo', note: '<strong>低标价，适合能接受分段等待的场景。</strong><br>标价 $0.04/音频小时，但每次请求至少计费 10 秒。当前接法等语音断句或缓冲后上传，短句频繁请求的费用会高于标价。' },
+    openai: { model: '', note: '<strong>沿用你的 OpenAI 语音服务。</strong><br>请使用 OpenAI 的 Key；回答模型的其他服务 Key 不能通用。模型和计费需与账号开通的语音接口一致。' },
+    google: { model: '', note: '<strong>Google Cloud 需要服务账户文件。</strong><br>展开识别参数，打开高级配置完成文件与项目设置。第一次使用更建议选择只填 Key 的服务。' },
+  };
+  function fillSpeech() {
+    const provider = $('#speech-provider').value, preset = speechPresets[provider];
+    $('#speech-key').value = '';
+    $('#speech-key').placeholder = credentials[keyFlags[provider]] ? '已填写，留空沿用；不回显 Key' : '填写此语音服务的 API Key';
+    $('#speech-model').value = (provider === 'groq' ? credentials.groqSttModel : credentials.sttModels?.[provider]) || preset?.model || '';
+    $('#speech-guidance').innerHTML = preset?.note || '这是高级语音服务，请打开高级配置管理。';
+  }
   fillSpeech(); $('#speech-provider').onchange = fillSpeech;
+  $('#speech-language').value = state.status.speech?.language || 'chinese';
   $('#save-speech-provider').onclick = action(async () => {
     if (state.status.sessionActive) throw new Error('请先结束采音，再更换语音服务');
     const provider = $('#speech-provider').value, apiKey = $('#speech-key').value.trim(), model = $('#speech-model').value.trim(), language = $('#speech-language').value;
-    const setters = { deepgram: native.setDeepgramApiKey, groq: native.setGroqSttApiKey, openai: native.setOpenAiSttApiKey };
+    const setters = { soniox: native.setSonioxApiKey, deepgram: native.setDeepgramApiKey, groq: native.setGroqSttApiKey, openai: native.setOpenAiSttApiKey };
     if (!setters[provider]) throw new Error('请选择语音服务；Google Cloud 文件和其他服务请打开高级配置。');
     if (!apiKey && !credentials[keyFlags[provider]]) throw new Error('请填写所选语音服务的 API Key');
     if (apiKey) checked(await setters[provider](apiKey));
@@ -196,6 +225,30 @@ async function renderConnections() {
     await renderConnections(); message('语音配置已保存在本机，下次打开自动使用。尚未开始采音。');
   });
   $('#advanced-models').onclick = action(() => openSection('models')); $('#advanced-speech').onclick = action(() => openSection('providers')); $('#capture-settings').onclick = action(() => selectView('setup'));
+  $('#appearance-theme').value = state.status.appearance?.theme || 'light';
+  $('#overlay-opacity').value = String(Math.round((state.status.appearance?.overlayOpacity ?? 0.88) * 100));
+  $('#overlay-text-opacity').value = String(Math.round((state.status.appearance?.overlayTextOpacity ?? 1) * 100));
+  $('#overlay-font-size').value = String(state.status.appearance?.overlayFontSize ?? 15);
+  const previewAppearance = () => {
+    const theme = $('#appearance-theme').value, alpha = Number($('#overlay-opacity').value) / 100;
+    $('#opacity-value').textContent = Math.round(alpha * 100) + '%';
+    const textAlpha = Number($('#overlay-text-opacity').value) / 100;
+    $('#text-opacity-value').textContent = Math.round(textAlpha * 100) + '%';
+    if ($('#opacity-preview').style) { $('#opacity-preview').style.backgroundColor = `rgba(${theme === 'dark' ? '35,37,35' : '252,251,247'},${alpha})`; $('#opacity-preview').style.color = `rgba(${theme === 'dark' ? '239,244,236' : '38,53,43'},${textAlpha})`; $('#opacity-preview').style.fontSize = $('#overlay-font-size').value + 'px'; }
+  };
+  const saveAppearance = action(async () => {
+    const appearance = { theme: $('#appearance-theme').value, overlayOpacity: Number($('#overlay-opacity').value) / 100, overlayTextOpacity: Number($('#overlay-text-opacity').value) / 100, overlayFontSize: Number($('#overlay-font-size').value) };
+    await call('appearance', appearance); state.status.appearance = appearance; applyAppearance(appearance); previewAppearance(); message('外观已自动保存在本机。');
+  });
+  $('#overlay-opacity').oninput = previewAppearance;
+  $('#overlay-opacity').onchange = saveAppearance;
+  $('#overlay-text-opacity').oninput = previewAppearance;
+  $('#overlay-text-opacity').onchange = saveAppearance;
+  $('#overlay-font-size').onchange = saveAppearance;
+  $('#appearance-theme').onchange = saveAppearance;
+  $('#main-ghost-preset').onclick = async () => { $('#overlay-opacity').value = '0'; $('#overlay-text-opacity').value = '35'; await saveAppearance(); };
+  $('#preview-overlay').onclick = action(async () => { checked(await native.setWindowMode('overlay')); });
+  previewAppearance();
 }
 async function renderMaterials() {
   await refresh(); const documents = state.status.documents;
@@ -252,6 +305,20 @@ async function renderPair() {
   $('#copy-pair').onclick = action(async () => { await navigator.clipboard.writeText($('#pair-url').value); message('已复制一次性链接。'); });
 }
 studio.onEvent(data => {
+  if (data.kind === 'navigate') { void action(async () => { await selectView(data.view); if (data.start) await $('#start').onclick(); })(); return; }
+  if (data.kind === 'shortcut') { if (data.action === 'quick') void action(() => ask())(); if (data.action === 'retry') void $('#retry-answer').onclick(); if (data.action === 'capture') void $('#capture-ask').onclick(); return; }
+  if (data.kind === 'appearance') {
+    if (state.status) state.status.appearance = data.value;
+    applyAppearance(data.value);
+    if (state.view === 'connect' && $('#overlay-opacity')) {
+      $('#appearance-theme').value = data.value.theme;
+      $('#overlay-opacity').value = String(Math.round(data.value.overlayOpacity * 100));
+      $('#overlay-text-opacity').value = String(Math.round((data.value.overlayTextOpacity ?? 1) * 100));
+      $('#overlay-font-size').value = String(data.value.overlayFontSize ?? 15);
+      $('#overlay-opacity').oninput?.();
+    }
+    return;
+  }
   if (data.kind === 'transcript') { state.transcripts.set(data.segment.segmentId, data.segment); renderTurns(); $('#partial').textContent = ''; return; }
   if (data.kind === 'reset') { state.transcripts.clear(); renderTurns(); return; }
   if (data.kind === 'started' && (!state.request || data.id === state.request)) renderSources(data.sources);
@@ -265,7 +332,7 @@ studio.onEvent(data => {
 native.onNativeAudioTranscript(data => { if (!data.final) $('#partial').textContent = (data.speaker === 'user' ? '我：' : '对方：') + data.text; });
 native.onMeetingStateChanged(() => refresh().catch(error => message(error.message)));
 native.onSessionReset(() => { state.transcripts.clear(); renderTurns(); });
-native.onGlobalShortcut(data => { if (data?.action === 'answer' || data?.action === 'manual-answer') action(() => ask())(); });
+native.onGlobalShortcut(data => { if (['reply','answer','manual-answer'].includes(data?.action)) void action(async () => { const s = await call('status'); if (s.floating?.mode !== 'overlay') await ask(); })(); });
 $('#start').onclick = action(async () => { await refresh(); if (!state.status.speech?.configured) { const reason = state.status.speech?.reason; await selectView('connect'); throw new Error(reason || '请先配置语音转写服务'); } $('#session-mic').checked = state.status.captureSettings.captureMicrophone; $('#session-screen').checked = state.view === 'written'; $('#source-dialog').showModal(); });
 $('#source-cancel').onclick = () => $('#source-dialog').close();
 $('#source-start').onclick = action(async () => { if ($('#source-start').disabled) return; $('#source-start').disabled = true; try { await call('audio-preferences', { ...state.status.captureSettings, captureMicrophone: $('#session-mic').checked }); await call('start'); $('#source-dialog').close(); if ($('#session-screen').checked) await selectView('written'); await refresh(); message('面试采音已启动，正在连接语音服务。'); } catch (error) { $('#source-dialog').close(); throw error; } finally { $('#source-start').disabled = false; } });

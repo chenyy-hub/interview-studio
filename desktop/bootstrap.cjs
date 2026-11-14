@@ -4,9 +4,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const launchCheck = process.argv.includes('--studio-launch-check');
+const windowCheck = process.argv.includes('--studio-window-check');
 // Isolate this fork's data before any upstream singleton is constructed.
 app.setName('Interview Studio');
-const studioData = launchCheck ? fs.mkdtempSync(path.join(os.tmpdir(), 'studio-launch-check-')) : path.join(app.getPath('appData'), 'InterviewStudio');
+const studioData = launchCheck || windowCheck ? fs.mkdtempSync(path.join(os.tmpdir(), 'studio-launch-check-')) : path.join(app.getPath('appData'), 'InterviewStudio');
 fs.mkdirSync(studioData, { recursive: true });
 app.setPath('userData', studioData);
 // Keep startup diagnostics separate from prompts, transcripts and credentials.
@@ -21,7 +22,11 @@ app.on('web-contents-created', (_event, contents) => {
     if (/^(Uncaught (TypeError|ReferenceError|SyntaxError)|Unable to load preload|Error: module not found)/.test(event.message)) startupLog('renderer-startup', event.message);
   });
 });
-if (launchCheck) {
+if (windowCheck) {
+  app.whenReady().then(() => require('./window-smoke.cjs').run()).then(() => app.exit(0)).catch(error => {
+    console.error('[Studio] Packaged window check failed:', error); app.exit(1);
+  });
+} else if (launchCheck) {
   // Exercise the packaged Electron browser-process bootstrap without a window,
   // credentials, microphone, screen capture or network request.
   app.whenReady().then(() => {

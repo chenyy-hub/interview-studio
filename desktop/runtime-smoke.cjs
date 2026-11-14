@@ -44,6 +44,28 @@ async function main() {
     assert.ok(cleared.resolveModelUse('chat').error);
   } finally { fs.rmSync(vaultDirectory, { recursive: true, force: true }); }
   console.log('Packaged credential manager: chat endpoint/model and speech keys survive reload, then clear; synthetic configuration only');
+  const keyDirectory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'studio-runtime-keys-'));
+  try {
+    const keys = new Map();
+    const fakeElectron = { app: { getPath: () => keyDirectory, name: 'Synthetic Window Check' }, BrowserWindow: { getAllWindows: () => [] }, Menu: { buildFromTemplate: value => value, setApplicationMenu() {} },
+      globalShortcut: { register: (key, callback) => { if (keys.has(key)) return false; keys.set(key, callback); return true; }, unregister: key => keys.delete(key), unregisterAll: () => keys.clear(), isRegistered: key => keys.has(key) } };
+    let KeybindManager;
+    try {
+      Module._load = function(name, ...args) { return name === 'electron' ? fakeElectron : originalLoad.call(this, name, ...args); };
+      ({ KeybindManager } = packaged('./dist-electron/electron/services/KeybindManager.js'));
+    } finally { Module._load = originalLoad; }
+    const manager = KeybindManager.getInstance();
+    manager.registerGlobalShortcuts();
+    keys.set('CommandOrControl+Shift+O', () => {});
+    keys.set('CommandOrControl+Shift+U', () => {});
+    manager.setMode('overlay');
+    assert.equal(keys.has('CommandOrControl+Shift+O'), true);
+    assert.equal(keys.has('CommandOrControl+Shift+U'), true);
+    manager.setMode('launcher');
+    assert.equal(keys.has('CommandOrControl+Shift+O'), true);
+    assert.equal(keys.has('CommandOrControl+Shift+U'), true);
+  } finally { fs.rmSync(keyDirectory, { recursive: true, force: true }); }
+  console.log('Packaged shortcut mode changes preserve floating and recovery keys; synthetic registrations only');
   for (const address of ['10.0.0.1', '172.16.0.1', '192.168.1.5']) assert.equal(isPrivateIPv4(address), true);
   for (const address of ['8.8.8.8', '172.32.1.1', '192.168..1', '10.1.1.999', null]) assert.equal(isPrivateIPv4(address), false);
   const { WebSocket } = packaged('ws');

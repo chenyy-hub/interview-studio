@@ -13,6 +13,8 @@ const { ContextIndex } = require('./context-index.cjs');
 const { streamOpenAI } = require('./fast-stream.cjs');
 const { createPrivacy } = require('./privacy-controller.cjs');
 const { preparation, preparationContext, documentHash, documentVersion } = require('./preparation.cjs');
+const { appearance, createAppearance } = require('./appearance.cjs');
+const { createFloating } = require('./floating.cjs');
 
 function install(appState) {
   const compiled = path.join(app.getAppPath(), 'dist-electron/electron');
@@ -25,6 +27,9 @@ function install(appState) {
   try { store.audio = audioPreferences(store.audio); } catch { store.audio = { backend: process.platform === 'win32' ? 'wasapi' : 'sck', captureMicrophone: false, inputDeviceId: 'default', outputDeviceId: 'default' }; }
   store.performance = { mode: store.performance?.mode === 'balanced' ? 'balanced' : 'fast' };
   store.privacy = { enabled: store.privacy?.enabled !== false, selfTest: store.privacy?.selfTest || null };
+  try { store.appearance = appearance(store.appearance); } catch { store.appearance = appearance(); }
+  const appearanceController = createAppearance({ app, BrowserWindow, settings: store.appearance });
+  void appearanceController.apply(store.appearance).catch(() => {});
   // The upstream getter defaults to English even when nothing was saved.
   // Migrate only an explicit stored preference, keeping first use Chinese.
   const language = cm.credentials?.aiResponseLanguage === 'English' ? 'English' : 'Chinese';
@@ -62,12 +67,12 @@ function install(appState) {
     fs.renameSync(storePath + '.tmp', storePath);
   };
   const send = data => {
-    for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && win.webContents.getURL().includes('/desktop/index.html')) win.webContents.send('studio:event', data);
+    for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && ['/desktop/index.html','/desktop/overlay.html'].some(file => win.webContents.getURL().includes(file))) win.webContents.send('studio:event', data);
     if (room) room.publish(data);
   };
   const handle = (name, fn) => ipcMain.handle('studio:' + name, async (event, payload) => {
     let local = false;
-    try { local = fileURLToPath(event.senderFrame.url.split('?')[0]) === path.join(app.getAppPath(), 'desktop/index.html'); } catch {}
+    try { local = ['desktop/index.html','desktop/overlay.html'].some(file => fileURLToPath(event.senderFrame.url.split('?')[0]) === path.join(app.getAppPath(), file)); } catch {}
     if (!local || event.senderFrame !== event.sender.mainFrame) return { success: false, error: '不受信任的窗口' };
     try { return await fn(payload, event); }
     catch (error) { return { success: false, error: String(error.message || '操作失败') }; }
@@ -76,9 +81,9 @@ function install(appState) {
     const use = cm.resolveModelUse('chat');
     return { model: 'connection' in use ? { model: use.model, provider: use.connection.name } : null,
       modelError: 'error' in use ? use.error : null, credentialStorage: cm.studioCredentialSession?.state() || { mode: 'memory' },
-      performance: store.performance, privacy: { ...privacy.status(), selfTest: store.privacy.selfTest || null },
-      platform: process.platform, appVersion: app.getVersion?.() || '0.7.0', preparation: store.preparation,
-      speech: speechReadiness(cm), captureSettings: store.audio, needsConfiguration: needsConfiguration && !speechReadiness(cm).configured,
+      performance: store.performance, privacy: { ...privacy.status(), selfTest: store.privacy.selfTest || null }, floating: floating.status(),
+      platform: process.platform, appVersion: app.getVersion?.() || '0.8.0', preparation: store.preparation, appearance: store.appearance,
+      speech: { ...speechReadiness(cm), language: cm.credentials?.sttLanguage || 'chinese' }, captureSettings: store.audio, needsConfiguration: needsConfiguration && !speechReadiness(cm).configured,
       permissions: capturePermissions(systemPreferences),
       sessionActive: !!appState.getCurrentMeetingId(), preferences: { notes: store.notes, glossary: store.glossary, autoAnswer: store.autoAnswer },
       documents: store.documents.map(({ id, name, text }) => ({ id, name, characters: text.length })),
@@ -86,6 +91,36 @@ function install(appState) {
       sttProvider: cm.getSttProvider(), audio: appState.getNativeAudioStatus?.() || null };
   };
   handle('status', readiness);
+  const saveAppearance = async data => {
+    const next = appearance({ ...store.appearance, ...data }), previous = store.appearance;
+    store.appearance = next;
+    try { write(); } catch (error) { store.appearance = previous; throw error; }
+    await appearanceController.apply(next);
+    for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('overlay-opacity-changed', next.overlayOpacity);
+    send({ kind: 'appearance', value: next });
+    return { success: true };
+  };
+  handle('appearance', saveAppearance);
+  // Keep the upstream overlay's opacity control and the Chinese settings in sync.
+  ipcMain.removeHandler?.('set-overlay-opacity');
+  ipcMain.handle('set-overlay-opacity', async (event, value) => {
+    let trusted = false;
+    try { trusted = event.senderFrame === event.sender.mainFrame && ['desktop/index.html','desktop/overlay.html','dist/index.html'].some(file => fileURLToPath(event.senderFrame.url.split('?')[0]) === path.join(app.getAppPath(), file)); } catch {}
+    if (!trusted) return { success: false, error: '不受信任的窗口' };
+    try { return await saveAppearance({ ...store.appearance, overlayOpacity: value }); }
+    catch (error) { return { success: false, error: error.message }; }
+  });
+  const floating = createFloating({ app, appState, globalShortcut, onChange: value => send({ kind: 'floating-state', value }) });
+  handle('floating', async data => {
+    if (['settings','prepare-session'].includes(data?.action)) {
+      floating.run({ action: 'main' });
+      const win = appState.windowHelper.getLauncherWindow();
+      if (!win.webContents.getURL().includes('/desktop/index.html')) await win.loadURL(pathToFileURL(path.join(app.getAppPath(), 'desktop/index.html')).href);
+      win.webContents.send('studio:event', { kind: 'navigate', view: data.action === 'settings' ? 'connect' : 'interview', start: data.action === 'prepare-session' });
+      return { success: true };
+    }
+    return { success: true, ...floating.run(data) };
+  });
   handle('preparation', data => {
     const next = preparation(data);
     if (next.resumeDocumentId && !store.documents.some(d => d.id === next.resumeDocumentId)) throw new Error('所选简历已不存在，请重新选择');
@@ -104,7 +139,7 @@ function install(appState) {
   });
   handle('privacy-test', data => {
     if (!['feishu','tencent','other'].includes(data?.client) || !['screen','window'].includes(data?.capture) || !['passed','failed'].includes(data?.result) || typeof data.version !== 'string' || !data.version.trim() || data.version.length > 80) throw new Error('请填写会议客户端、版本、共享方式和实际结果');
-    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.7.0', source: 'user-reported' };
+    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.8.0', source: 'user-reported' };
     write(); return { success: true };
   });
   handle('hide', () => { privacy.toggleVisibility(); return { success: true }; });
@@ -315,6 +350,7 @@ function install(appState) {
     if (contents.__studioObserved) return; contents.__studioObserved = true;
     const original = contents.send.bind(contents);
     contents.send = (channel, ...args) => {
+      if (['screenshot-attached','screenshot-taken'].includes(channel) && typeof args[0]?.path === 'string') screenshots.add(args[0].path);
       if (channel === 'native-audio-transcript' && contents === appState.windowHelper.getLauncherWindow()?.webContents) {
         const segment = args[0];
         if (segment?.text && segment.final) {
