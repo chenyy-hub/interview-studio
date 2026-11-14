@@ -1,51 +1,45 @@
-# v0.7 验证记录
+# v0.8 验证记录
 
-日期：2026-11-14。开发平台：macOS arm64；Windows 构建平台：Windows x64 runner。固定上游 Pika 3.4.0。
+日期：2026-11-14。生产代码：c0c8c7f88c1b19ce15fd29bf6bd954a2f753b1ab。
+固定上游 Pika 3.4.0；macOS arm64 本机构建，Windows x64 由 Windows runner 编译。
 
 | 检查 | 结果与边界 |
 | --- | --- |
-| Node 自动检查 | 40 项通过，覆盖双栏失败/取消、SSE 超时、上下文预算、准备信息、短简历全文、重叠去除、内容去重、来源版本、凭证、窗口状态与 IPC |
-| Python 打包布局检查 | 4 项通过，检查辅助程序命名、二进制缺失与 bundle 一致性 |
-| Mac 原生打包 | 已完成；辅助程序路径检查、ASAR 完整性与本地代码签名验证通过 |
-| Mac 界面 | 实际打开最终 v0.7；面试准备可选字段与回答偏好可用，默认中文；合成 DOCX 导入、设为简历、全文预览、退出/重启保留及移除通过 |
-| 配置迁移 | 仅迁移明确保存过的语言偏好；不把旧内核的默认英文值误当成用户选择 |
-| 提问上下文 | 指定简历不超过 4,000 字符时完整加入；长资料按预算选择；快答/解释的实际输入来源分开记录，历史预览校验原文版本 |
-| API 本地保存 | 使用真实打包凭证管理器及合成配置，验证服务地址、模型、回答与语音 Key 重载和清除；无钥匙串访问 |
-| 正常退出 | 已检查 SingletonLock 被删除，避免后台残留阻止再次启动 |
-| 打包依赖 | 真实 SQLite、DOCX、PDF、WebSocket 与原生音频模块装载通过 |
-| 音频分支 | 合成替身检查仅系统音频/可选麦克风；没有开启真实录音 |
-| 手机配对 | 真实打包服务在本机回环地址验证令牌、单客户端、提问与重连快照；未在真实 Wi-Fi 设备实测 |
-| Windows 适配器 | 固定上游源码在 Windows 实际编译；已修复流接口、COM 生命周期和空闲等待；验证文件 URL、目标、配置恢复与卸载数据保留 |
-| Windows EXE | v0.7 安装版与便携版均已生成并上传；原生模块编译、Electron 浏览器进程启动、打包依赖与配置恢复检查通过；未实测物理设备音频 |
-| 真实链路 | 未配置真实 API Key；未测真实模型延迟、CER/WER、长会话、会议共存和共享保护 |
+| Node 自动检查 | 47 项通过，包括透明背景与独立文字、悬浮窗状态/穿透恢复、快捷键冲突、双窗口回答、截图取消、配置保存、上下文与流式错误处理 |
+| Python 打包检查 | 4 项通过，检查辅助程序命名与布局 |
+| Mac 签名与压缩包 | 本地签名及 ASAR 完整性验证通过；ZIP 完整 CRC 通过，保留 14 个框架符号链接 |
+| Mac 实际界面 | 最终生产包已启动；中文悬浮层、0% 背景 / 35% 文字预设、收起展开、返回主设置可用；退出再启动后偏好仍保留，启动回普通主窗口 |
+| Mac 快捷键状态 | 进入/退出悬浮、恢复点击、快答、截图、滚动和切栏注册状态已展示；未在真实会议中逐项触发 |
+| Windows 运行包 | 编译、Electron 浏览器进程启动与真实打包依赖检查通过 |
+| Windows 窗口动作 | 使用真实打包 WindowHelper 创建 OS 窗口，检查工作区范围、关闭/缩放能力，并执行最大化、还原、最小化和关闭；Windows runner 通过 |
+| Windows 悬浮渲染 | 真实 preload、CSP 和 overlay.html 启动；在合成配置下检查背景 alpha=0、文字 opacity=0.35、字号 18 px；Windows runner 通过 |
+| 快捷键稳定性 | 真实打包 KeybindManager 在合成注册表下切换模式，确认不再清空悬浮与恢复键 |
+| 本地 API 保存 | 真实打包凭证管理器使用合成地址、模型及密钥验证重载、清除；未访问钥匙串 |
+| 原生音频模块 | 真实模块装载、延迟打开麦克风和采样率读取通过；系统音频/可选麦克风启动分支使用替身，没有真实录音 |
+| 配对与文档 | SQLite、DOCX、PDF 与 WebSocket 装载/解析通过；回环地址上的令牌、单客户端与重连快照通过，未在真实手机 Wi-Fi 测试 |
+| Windows 安装包 | NSIS 与便携版构建均成功，源产物含 SHA256 与 windows-verification.json；独立 Release 发布另见下方记录 |
 
-所有模型测试使用替身或本地合成流，没有把固定时间的模拟响应当作真实速度。
-安装包为开发版本，尚未完成公证/Windows 代码签名。
-
+Windows 构建：https://github.com/chenyy-hub/interview-studio/actions/runs/43575457925
+Release 文件转存：https://github.com/chenyy-hub/interview-studio/actions/runs/43577675531
+发布页：https://github.com/chenyy-hub/interview-studio/releases/tag/v0.8.0
 源码仓库：https://github.com/chenyy-hub/interview-studio （私有）。
-v0.7 生产代码对应提交 9ab2fba。Windows 最终构建成功，用时 15 分 32 秒；
-下载构建页中的 InterviewStudio-Windows-x64，包含安装版、便携版、SHA256
-及 windows-verification.json。构建记录：
-https://github.com/chenyy-hub/interview-studio/actions/runs/43550681373
 
-2026-11-14 已将上述原始 EXE 单独发布到 GitHub Releases，避免每次下载
-包含两种程序的 647 MB 构建压缩包。安装版 353,025,508 字节；便携版
-294,008,245 字节。转存前核对成功构建的代码提交、两个 EXE 的 SHA256
-及运行验证报告；未重新编译或更改版本。发布文件持续保留。
-发布页：https://github.com/chenyy-hub/interview-studio/releases/tag/v0.7.0
-发布记录：https://github.com/chenyy-hub/interview-studio/actions/runs/43568991323
+工作流账号不能为含工作流改动的目标提交创建 Release；已由现有授权账号
+建立标签及草稿，服务器校验并上传原始文件，再由发布账号完成发布。
+没有把个人长期密钥保存在 Actions 中。安装版文件大小 356,567,568 字节，
+名称统一为 InterviewStudio-Windows-Setup.exe，后续可使用固定最新版入口。
+Release 已发布，固定入口指向 v0.8.0；文件内容与原始构建校验值一致。
 
-Windows 检查仅证明浏览器进程、模块依赖及合成配置/音频分支可用，不是
-完整会议实测。上一个已通过的 v0.6 构建记录仍保留：
-https://github.com/chenyy-hub/interview-studio/actions/runs/43463841916
+所有模型测试使用替身或本地合成流。本机界面验证没有填写真实 API Key、
+启动采音或发送模型请求。语音服务建议来自官方当前文档，不是实际中文
+准确率横评。真实 CER/WER、模型首字延迟、会议音频共存、蓝牙切换、
+Windows 跨虚拟桌面与飞书/腾讯会议接收端的共享保护仍未实测。
 
-实际构建修复了：测试替身的跨平台路径、Windows 原生流接口与 COM 初始化、
-官方 Mac 包和干净源码的启动路径差异、凭证写入方法拆分后的兼容性。
-运行验证已前置到安装器压缩之前，避免等压缩结束才发现启动问题。
+Mac 跨桌面/全屏显示与 Windows 置顶是已接入的机制，不等同于全部会议环境
+兼容，也不等同于屏幕共享一定不可见。键盘防护、三连击截图、新悬浮快捷键
+自定义界面仍未实现。开发包尚未完成 macOS 公证和 Windows 代码签名。
 
-Mac 生产包已正常打开并保留在面试准备页。本次界面检查没有输入真实 Key，
-没有发送模型请求或启动录音；导入的项目内合成文档已经移除。重复导入和
-失效来源的错误分支通过自动检查，未把未完成的第二次原生文件选择算作
-界面验证。共享保护仍需飞书/腾讯会议接收端验证，不能等同于不可见保证。
+之前的成功构建保留：
 
-Mac 压缩包完整 CRC 检查通过，保留全部 14 个框架符号链接；校验值随包提供。
+- v0.7：https://github.com/chenyy-hub/interview-studio/actions/runs/43550681373
+- v0.6：https://github.com/chenyy-hub/interview-studio/actions/runs/43463841916

@@ -61,7 +61,7 @@ tests, packaging or a successful startup.
 ## Windows
 
 Download the individual Setup executable from the private repository's
-[v0.7.0 release](https://github.com/chenyy-hub/interview-studio/releases/tag/v0.7.0).
+[latest installer](https://github.com/chenyy-hub/interview-studio/releases/latest/download/InterviewStudio-Windows-Setup.exe).
 The portable executable is an alternative; users do not need both. Release
 assets retain the original verified build checksums and do not expire with
 the Actions artifact. Repository access is required.
@@ -71,6 +71,11 @@ builds its renderer/main/native addon, applies this extension, and creates a
 per-user installer plus a portable x64 executable. Packaged browser startup and
 native dependencies are checked before artifacts are uploaded. No Windows
 code-signing certificate is configured; this is a development build.
+
+For release transfer, the trusted publisher creates a tag and draft release for
+the verified build commit first. **Publish Windows Installers** checks the tag,
+build and checksums, and uploads individual files. The publisher checks the
+assets and publishes the draft. No long-lived personal token is stored in Actions.
 
 ## macOS local build
 
