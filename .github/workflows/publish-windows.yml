@@ -6,15 +6,15 @@ on:
       run_id:
         description: Successful Windows Desktop Build run
         required: true
-        default: '43550681373'
+        default: '43575457925'
       source_sha:
         description: Exact production code commit of that build
         required: true
-        default: '9ab2fba336ac23c976c9c3db4bff26f3dc50be47'
+        default: 'c0c8c7f88c1b19ce15fd29bf6bd954a2f753b1ab'
       version:
         description: Existing binary version
         required: true
-        default: '0.7.0'
+        default: '0.8.0'
 
 permissions:
   actions: read
@@ -76,8 +76,20 @@ jobs:
       - name: Publish individual files without rebuilding
         run: |
           tag="v$VERSION"
+          cp "installers/InterviewStudio-Setup-$VERSION-x64.exe" installers/InterviewStudio-Windows-Setup.exe
+          cp "installers/InterviewStudio-Portable-$VERSION-x64.exe" installers/InterviewStudio-Windows-Portable.exe
+          python3 - <<'PY'
+          import os, pathlib
+          p = pathlib.Path('installers/SHA256SUMS.txt')
+          text = p.read_text(encoding='utf-8-sig')
+          for kind in ['Setup', 'Portable']:
+              text = text.replace(f"InterviewStudio-{kind}-{os.environ['VERSION']}-x64.exe", f'InterviewStudio-Windows-{kind}.exe')
+          p.write_text(text)
+          PY
           cat > release-notes.md <<'NOTES'
-          Windows 10/11 x64：通常只需下载 Setup.exe 安装版；Portable.exe 是可选的免安装版。
+          Windows 10/11 x64：下载 InterviewStudio-Windows-Setup.exe 安装版；Portable 是可选的免安装版。
+
+          固定最新版入口：https://github.com/chenyy-hub/interview-studio/releases/latest/download/InterviewStudio-Windows-Setup.exe
 
           本次仅重新分发已通过检查的原始构建文件，SHA256 与构建记录一致。无需下载包含两份程序的 Actions 压缩包。
 
@@ -85,5 +97,5 @@ jobs:
           NOTES
           printf '\n源代码：%s\n构建记录：https://github.com/%s/actions/runs/%s\n' "$SOURCE_SHA" "$GH_REPO" "$RUN_ID" >> release-notes.md
           gh release create "$tag" --target "$SOURCE_SHA" --title "面试工作室 $VERSION" --notes-file release-notes.md --draft
-          gh release upload "$tag" "installers/InterviewStudio-Setup-$VERSION-x64.exe" "installers/InterviewStudio-Portable-$VERSION-x64.exe" installers/SHA256SUMS.txt installers/windows-verification.json
+          gh release upload "$tag" installers/InterviewStudio-Windows-Setup.exe installers/InterviewStudio-Windows-Portable.exe installers/SHA256SUMS.txt installers/windows-verification.json
           gh release edit "$tag" --draft=false --latest
