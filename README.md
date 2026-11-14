@@ -87,5 +87,5 @@ adapter. The corresponding upstream source is pinned, fetched and built by the
 Windows workflow. It is not an official Pika or Interview Genie release.
 
 The reviewed Interview Genie documentation and remaining gaps are in
-`GENIE_FEATURES_V06.md`. Windows build results are tracked in the private
+`GENIE_FEATURES.md`. Windows build results are tracked in the private
 repository Actions, not inferred from local configuration checks.

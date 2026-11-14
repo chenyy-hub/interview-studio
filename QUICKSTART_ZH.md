@@ -24,3 +24,15 @@ API 配置保存在本机用户目录的加密文件中，密钥也在同一目�
 「简历与资料」可以一次导入并设为简历；重复内容复用已有文件。短简历会
 全文进入背景，长资料使用相关片段。回答区的资料栏可以查看本次发送的
 片段，历史资料已修改或删除时会明确提示，避免误把新版本当成旧引用。
+
+## Windows 下载
+
+打开已通过的构建页：
+https://github.com/chenyy-hub/interview-studio/actions/runs/43550681373
+
+登录有权限的 GitHub 账号，在页面底部 Artifacts 下载
+`InterviewStudio-Windows-x64`。解压后，安装使用
+`InterviewStudio-Setup-0.7.0-x64.exe`；免安装使用
+`InterviewStudio-Portable-0.7.0-x64.exe`。该构建产物保留 14 天，下载后请自行保留。
+卸载安装版默认保留本机资料与 API 配置。两种版本均为开发构建，尚未完成
+Windows 代码签名与真实设备/会议验证。

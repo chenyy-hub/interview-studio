@@ -77,4 +77,4 @@ https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectio
 均已实际生成，浏览器进程启动及打包依赖/配置恢复检查通过。
 真实会议音频和共享保护仍未实机验证。
 源码：https://github.com/chenyy-hub/interview-studio
-构建：https://github.com/chenyy-hub/interview-studio/actions/runs/43463841916
+v0.7 构建（2026-11-14）：https://github.com/chenyy-hub/interview-studio/actions/runs/43550681373
