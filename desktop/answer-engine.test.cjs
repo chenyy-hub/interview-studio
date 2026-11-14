@@ -56,3 +56,11 @@ test('cancel releases an iterator that ignores the provider abort signal', async
   assert.equal(events.at(-1).kind, 'done');
   assert.equal(events.at(-1).ok, false);
 });
+
+test('saved answer language and programming preferences reach both actual provider prompts', async () => {
+  const prompts = [];
+  await runAnswers({ request: { id: 'language', task: 'written', question: 'fixture', dual: true }, context: '', preparation: { language: 'English', style: 'structured', programmingLanguage: 'C++' }, signal: new AbortController().signal, send() {},
+    stream: async function* (_q,_i,_c,system) { prompts.push(system); yield 'synthetic'; } });
+  assert.equal(prompts.length,2);
+  for (const prompt of prompts) { assert.match(prompt,/Answer in English/); assert.match(prompt,/C\+\+/); assert.ok(!prompt.includes('用中文作答')); }
+});

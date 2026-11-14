@@ -12,6 +12,7 @@ const { speechReadiness, audioPreferences, capturePermissions } = require('./ser
 const { ContextIndex } = require('./context-index.cjs');
 const { streamOpenAI } = require('./fast-stream.cjs');
 const { createPrivacy } = require('./privacy-controller.cjs');
+const { preparation, preparationContext, documentHash, documentVersion } = require('./preparation.cjs');
 
 function install(appState) {
   const compiled = path.join(app.getAppPath(), 'dist-electron/electron');
@@ -24,6 +25,9 @@ function install(appState) {
   try { store.audio = audioPreferences(store.audio); } catch { store.audio = { backend: process.platform === 'win32' ? 'wasapi' : 'sck', captureMicrophone: false, inputDeviceId: 'default', outputDeviceId: 'default' }; }
   store.performance = { mode: store.performance?.mode === 'balanced' ? 'balanced' : 'fast' };
   store.privacy = { enabled: store.privacy?.enabled !== false, selfTest: store.privacy?.selfTest || null };
+  const language = cm.getAiResponseLanguage?.() === 'English' ? 'English' : 'Chinese';
+  try { store.preparation = preparation(store.preparation || {}, { language }); }
+  catch { store.preparation = preparation({}, { language }); }
   const contextIndex = new ContextIndex(store.documents, store.notes);
   const reindex = () => contextIndex.reset(store.documents, store.notes);
   const privacy = createPrivacy({ app, appState, BrowserWindow, globalShortcut });
@@ -40,12 +44,11 @@ function install(appState) {
     const upstreamStream = llm.streamChat.bind(llm);
     llm.streamChat = async function* (question, images, context, system, options) {
       const mode = options?.mode || store.performance.mode;
-      const ownBackground = contextIndex.select(question || '', mode === 'fast' ? 6000 : 18000).text;
-      const combined = context?.startsWith('[STUDIO_CONTEXT]') ? context : ownBackground + '\n\n' + (context || '').slice(-6000);
+      const combined = context?.startsWith('[STUDIO_CONTEXT]') ? context : contextIndex.select(question || '', mode === 'fast' ? 6000 : 18000, store.preparation).text + preparationContext(store.preparation) + '\n\n' + (context || '').slice(-6000);
       const use = cm.resolveModelUse('chat');
       if ('connection' in use && use.connection.type === 'openai' && !images?.length) {
         yield* streamOpenAI({ connection: use.connection, model: use.model, question, context: combined,
-          system: system || '根据真实背景用中文简明回答，不编造个人经历。', signal: options?.signal,
+          system: system || (store.preparation.language === 'English' ? 'Answer briefly in English using only true personal background.' : '根据真实背景用中文简明回答，不编造个人经历。'), signal: options?.signal,
           column: options?.column || 'quick', mode, onStage: options?.onStage });
       } else yield* upstreamStream(question, images, combined, system, { ...options, verbatimPrompt: true });
     };
@@ -71,7 +74,7 @@ function install(appState) {
     return { model: 'connection' in use ? { model: use.model, provider: use.connection.name } : null,
       modelError: 'error' in use ? use.error : null, credentialStorage: cm.studioCredentialSession?.state() || { mode: 'memory' },
       performance: store.performance, privacy: { ...privacy.status(), selfTest: store.privacy.selfTest || null },
-      platform: process.platform, appVersion: app.getVersion?.() || '0.6.0',
+      platform: process.platform, appVersion: app.getVersion?.() || '0.7.0', preparation: store.preparation,
       speech: speechReadiness(cm), captureSettings: store.audio, needsConfiguration: needsConfiguration && !speechReadiness(cm).configured,
       permissions: capturePermissions(systemPreferences),
       sessionActive: !!appState.getCurrentMeetingId(), preferences: { notes: store.notes, glossary: store.glossary, autoAnswer: store.autoAnswer },
@@ -80,6 +83,14 @@ function install(appState) {
       sttProvider: cm.getSttProvider(), audio: appState.getNativeAudioStatus?.() || null };
   };
   handle('status', readiness);
+  handle('preparation', data => {
+    const next = preparation(data);
+    if (next.resumeDocumentId && !store.documents.some(d => d.id === next.resumeDocumentId)) throw new Error('所选简历已不存在，请重新选择');
+    const previous = store.preparation;
+    store.preparation = next;
+    try { write(); } catch (error) { store.preparation = previous; throw error; }
+    return { success: true };
+  });
   handle('performance', data => {
     if (!['fast', 'balanced'].includes(data?.mode)) throw new Error('请选择极速或完整模式');
     store.performance = { mode: data.mode }; write(); return { success: true };
@@ -90,7 +101,7 @@ function install(appState) {
   });
   handle('privacy-test', data => {
     if (!['feishu','tencent','other'].includes(data?.client) || !['screen','window'].includes(data?.capture) || !['passed','failed'].includes(data?.result) || typeof data.version !== 'string' || !data.version.trim() || data.version.length > 80) throw new Error('请填写会议客户端、版本、共享方式和实际结果');
-    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.6.0', source: 'user-reported' };
+    store.privacy.selfTest = { client: data.client, capture: data.capture, result: data.result, version: data.version.trim(), at: new Date().toISOString(), platform: process.platform, appVersion: app.getVersion?.() || '0.7.0', source: 'user-reported' };
     write(); return { success: true };
   });
   handle('hide', () => { privacy.toggleVisibility(); return { success: true }; });
@@ -130,7 +141,7 @@ function install(appState) {
     if (appState.getCurrentMeetingId()) throw new Error('请先结束采音，再更换采音设置。');
     store.audio = audioPreferences(data); write(); return { success: true };
   });
-  handle('start', async () => { await appState.startMeeting({ title: '中文面试练习' }); return { success: true }; });
+  handle('start', async () => { await appState.startMeeting({ title: [store.preparation.company, store.preparation.role].filter(Boolean).join(' · ') || '面试练习' }); return { success: true }; });
   handle('credentials-enable', () => {
     if (!cm.studioCredentialSession) throw new Error('凭证服务未就绪');
     const result = cm.studioCredentialSession.enableEncrypted();
@@ -159,14 +170,15 @@ function install(appState) {
     const preparedAt = performance.now();
     const mode = store.performance.mode;
     const recent = appState.getIntelligenceManager().getFormattedContext(mode === 'fast' ? 60 : 180);
-    const quick = contextIndex.select(request.question, request.task === 'resume' ? 24000 : mode === 'fast' ? 6000 : 16000);
-    const deep = request.dual ? contextIndex.select(request.question, 24000) : quick;
-    const context = { quick: quick.text + '\n\n当前对话：\n' + recent.slice(-4500), deep: deep.text + '\n\n当前对话：\n' + recent.slice(-10000) };
+    const quick = contextIndex.select(request.question, request.task === 'resume' ? 24000 : mode === 'fast' ? 6000 : 16000, store.preparation);
+    const deep = request.dual ? contextIndex.select(request.question, 24000, store.preparation) : quick;
+    const sources = { quick: quick.sources, deep: request.dual ? deep.sources : [] };
+    const context = { quick: quick.text + preparationContext(store.preparation, mode === 'fast' ? 1500 : 6000) + '\n\n当前对话：\n' + recent.slice(-4500), deep: deep.text + preparationContext(store.preparation, 6000) + '\n\n当前对话：\n' + recent.slice(-10000) };
     metricRows.push({ requestId: request.id, event: 'context-ready', ms: Math.round(performance.now() - preparedAt), characters: quick.characters, chunks: quick.chunks, timestamp: Date.now() });
     const controller = new AbortController(); active.set(request.id, controller);
     const timeout = setTimeout(() => controller.abort(), 120000);
-    lastGeneration = { id: request.id, question: request.question, task: request.task, dual: request.dual, quick: '', deep: '', first: {}, running: true, error: '' };
-    send({ kind: 'started', id: request.id, question: request.question, task: request.task, dual: request.dual });
+    lastGeneration = { id: request.id, question: request.question, task: request.task, dual: request.dual, quick: '', deep: '', first: {}, sources, running: true, error: '' };
+    send({ kind: 'started', id: request.id, question: request.question, task: request.task, dual: request.dual, sources });
     let succeeded = false, partial = false;
     const emit = data => {
       if (lastGeneration?.id === data.id) {
@@ -182,12 +194,12 @@ function install(appState) {
       if (data.kind === 'done') { succeeded = data.ok; partial = data.partial; }
       send(data);
     };
-    void runAnswers({ request, context, imagePaths: paths, signal: controller.signal, mode,
+    void runAnswers({ request, context, imagePaths: paths, signal: controller.signal, mode, preparation: store.preparation,
       stream: (question, images, ctx, system, options) => appState.processingHelper.getLLMHelper().streamChat(question, images, ctx, system, { ...options, onStage: data => emit({ kind: 'metric', id: request.id, ...data }) }),
       send: data => emit(data.kind === 'error' ? { ...data, message: redactConnectionError(new Error(data.message), use.connection).message } : data),
     }).then(answers => {
       if (!Object.values(answers).some(text => text?.trim())) return;
-      store.answers.unshift({ id: request.id, question: request.question, task: request.task, answers, partial: partial || !succeeded, model: use.model, date: new Date().toISOString() });
+      store.answers.unshift({ id: request.id, question: request.question, task: request.task, answers, sources, partial: partial || !succeeded, model: use.model, date: new Date().toISOString() });
       store.answers = store.answers.slice(0, 150); write();
     }).catch(() => send({ kind: 'error', id: request.id, message: '保存问答失败，请导出当前回答。' }))
       .finally(() => { clearTimeout(timeout); active.delete(request.id); });
@@ -202,10 +214,11 @@ function install(appState) {
     screenshots.add(imagePath);
     return { success: true, path: imagePath, preview: await appState.getImagePreview(imagePath) };
   });
-  handle('import', async () => {
-    const choice = await dialog.showOpenDialog({ title: '导入简历或知识资料', properties: ['openFile', 'multiSelections'], filters: [{ name: '资料', extensions: ['txt','md','docx','pdf'] }] });
+  handle('import', async (data = {}) => {
+    const resume = data.kind === 'resume';
+    const choice = await dialog.showOpenDialog({ title: resume ? '选择一份简历' : '导入知识资料', properties: resume ? ['openFile'] : ['openFile', 'multiSelections'], filters: [{ name: '资料', extensions: ['txt','md','docx','pdf'] }] });
     if (choice.canceled) return { cancelled: true };
-    const added = [], failed = [];
+    const added = [], failed = [], duplicates = [];
     for (const filename of choice.filePaths) {
       try {
         if (fs.statSync(filename).size > 15 * 1024 * 1024) throw new Error('文件超过 15 MB');
@@ -217,17 +230,27 @@ function install(appState) {
         } else text = buffer.toString('utf8');
         if (!text?.trim()) throw new Error('未提取到文字；扫描 PDF 请先做 OCR');
         if (text.length > 80000) throw new Error('文字超过 80,000 字符，请拆分文件');
-        const item = { id: crypto.randomUUID(), name: path.basename(filename), text };
+        const hash = documentHash(text);
+        const existing = store.documents.find(d => (d.hash || documentHash(d.text)) === hash);
+        if (existing) { duplicates.push({ id: existing.id, name: path.basename(filename), existingName: existing.name }); if (resume) store.preparation.resumeDocumentId = existing.id; continue; }
+        const item = { id: crypto.randomUUID(), name: path.basename(filename), text, hash };
         store.documents.push(item); added.push({ id: item.id, name: item.name });
+        if (resume) store.preparation.resumeDocumentId = item.id;
       } catch (error) { failed.push({ name: path.basename(filename), error: String(error.message) }); }
     }
-    reindex(); write(); return { success: true, added, failed };
+    reindex(); write(); return { success: true, added, failed, duplicates };
   });
   handle('documents', data => {
-    if (data?.remove) { store.documents = store.documents.filter(d => d.id !== data.remove); reindex(); write(); }
+    if (data?.remove) { store.documents = store.documents.filter(d => d.id !== data.remove); if (store.preparation.resumeDocumentId === data.remove) store.preparation.resumeDocumentId = ''; reindex(); write(); }
     return store.documents.map(({ id, name, text }) => ({ id, name, characters: text.length }));
   });
   handle('records', () => store.answers);
+  handle('document-text', data => {
+    const doc = data?.id === 'profile' ? { id: 'profile', name: '真实背景', text: store.notes } : store.documents.find(d => d.id === data?.id);
+    if (!doc) throw new Error('这份资料已移除，无法查看原文');
+    if (data.hash !== undefined && data.hash !== documentVersion(doc.text)) throw new Error('资料已更新，当前原文与本次回答使用的版本不同');
+    return { id: doc.id, name: doc.name, text: doc.text };
+  });
   handle('export', async ({ text, filename } = {}) => {
     if (typeof text !== 'string' || text.length > 2000000) throw new Error('导出内容不正确');
     const result = await dialog.showSaveDialog({ title: '导出记录', defaultPath: path.basename(filename || 'interview-record.md'), filters: [{ name: 'Markdown', extensions: ['md'] }] });

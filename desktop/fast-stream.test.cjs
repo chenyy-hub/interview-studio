@@ -13,6 +13,7 @@ test('compatible endpoints preserve gateway prefixes and reject unsafe credentia
   assert.equal(endpointFor('https://api.deepseek.com'), 'https://api.deepseek.com/v1/chat/completions');
   assert.equal(endpointFor('https://example.test/openai/v1/'), 'https://example.test/openai/v1/chat/completions');
   assert.equal(endpointFor('http://127.0.0.1:11434/v1'), 'http://127.0.0.1:11434/v1/chat/completions');
+  assert.equal(endpointFor('https://example.test/openai/v1/chat/completions/'), 'https://example.test/openai/v1/chat/completions');
   assert.throws(() => endpointFor('http://remote.example/v1'));
   assert.throws(() => endpointFor('https://user:password@example.test/v1'));
 });

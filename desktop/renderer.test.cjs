@@ -56,10 +56,10 @@ test('Chinese connection form saves to the native registry without a model call 
   await new Promise(resolve => setImmediate(resolve));
   await element('#settings').onclick();
   assert.match(element('#other').innerHTML, /回答模型/);
-  element('#connection-key').value = 'synthetic-test-key'; element('#answer-language').value = 'Chinese';
+  element('#connection-key').value = 'synthetic-test-key'; element('#answer-language').value = 'Chinese'; element('#connection-url').value = 'https://api.deepseek.com/v1/chat/completions';
   await element('#save-connection').onclick();
   assert.equal(calls[0][1].apiKey, 'synthetic-test-key');
-  assert.equal(calls[0][1].baseUrl, 'https://api.deepseek.com');
+  assert.equal(calls[0][1].baseUrl, 'https://api.deepseek.com/v1');
   assert.equal(calls[1][1].model, 'deepseek-flash');
   assert.equal(element('#connection-key').value, '');
   assert.ok(!element('#other').innerHTML.includes('synthetic-test-key'));
@@ -115,4 +115,21 @@ test('saved local status is visible, source confirmation precedes capture, and s
   const ask = calls.find(c => c.name === 'ask').data;
   assert.equal(ask.task, 'written'); assert.deepEqual([...ask.images], ['/synthetic/screen.png']);
   assert.match(ask.question, /截图中的题目/);
+});
+
+test('interview preparation saves locally and returns to the workbench without a provider request', async () => {
+  const elements = new Map(), calls = [];
+  const element = selector => { if (!elements.has(selector)) elements.set(selector, { value: '', checked: false, classList: { toggle() {} }, querySelectorAll: () => [], addEventListener() {} }); return elements.get(selector); };
+  const status = { sessionActive: false, model: null, permissions: {}, documents: [], transcripts: [], metrics: [], preparation: { language: 'Chinese', style: 'natural', programmingLanguage: 'auto' } };
+  const context = { document: { querySelector: element, querySelectorAll: () => [] }, electronAPI: { onNativeAudioTranscript() {}, onMeetingStateChanged() {}, onSessionReset() {}, onGlobalShortcut() {} }, addEventListener() {} };
+  context.window = context;
+  Object.defineProperty(context, 'studio', { configurable: false, value: { onEvent() {}, invoke: async (name,data) => { calls.push(name); if (name === 'preparation') { status.preparation = data; return { success: true }; } return status; } } });
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, 'renderer.js'), 'utf8'), context);
+  await new Promise(resolve => setImmediate(resolve));
+  await element('#prepare').onclick(); assert.match(element('#other').innerHTML, /岗位描述/);
+  element('#prep-company').value='Synthetic'; element('#prep-role').value='Driver'; element('#prep-jd').value='Synthetic JD'; element('#prep-language').value='English'; element('#prep-style').value='structured'; element('#prep-programming').value='C++';
+  await element('#save-preparation').onclick();
+  assert.equal(element('#work').hidden,false); assert.equal(element('#other').hidden,true);
+  assert.match(element('#preparation-summary').textContent,/Synthetic/); assert.match(element('#preparation-summary').textContent,/英文回答/);
+  assert.equal(status.preparation.programmingLanguage,'C++'); assert.ok(calls.every(name => ['status','preparation'].includes(name)));
 });

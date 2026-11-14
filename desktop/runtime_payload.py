@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PRODUCT = "InterviewStudio"
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 
 def replace_once(text, old, new):
     if text.count(old) != 1:
@@ -15,7 +15,7 @@ def runtime_payload(read):
         raise RuntimeError('This adapter targets the Pika 3.4.0 release only')
     package.update(name='interview-studio', version=VERSION, main='desktop/bootstrap.cjs', productName=PRODUCT)
     additions = {'package.json': json.dumps(package, ensure_ascii=False, indent=2).encode()}
-    for filename in ['bootstrap.cjs','credential-session.cjs','local-vault.cjs','service-readiness.cjs','audio-devices.cjs','native.cjs','answer-engine.cjs','context-index.cjs','fast-stream.cjs','privacy-controller.cjs','index.html','renderer.js','studio.css','remote.html']:
+    for filename in ['bootstrap.cjs','credential-session.cjs','local-vault.cjs','service-readiness.cjs','audio-devices.cjs','native.cjs','answer-engine.cjs','context-index.cjs','preparation.cjs','fast-stream.cjs','privacy-controller.cjs','index.html','renderer.js','studio.css','remote.html']:
         additions['desktop/' + filename] = (ROOT / 'desktop' / filename).read_bytes()
     original_preload = read('dist-electron/electron/preload.js')
     additions['desktop/preload.cjs'] = (original_preload + '\n' + (ROOT / 'desktop/preload-extra.cjs').read_text()).encode()

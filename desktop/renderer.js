@@ -20,6 +20,8 @@ function openSection(section) { return call('settings', { section }); }
 async function refresh(restore = false) {
   state.status = await call('status');
   const s = state.status;
+  const prep = s.preparation || {};
+  $('#preparation-summary').textContent = [prep.company, prep.role, prep.language === 'English' ? '英文回答' : '中文回答'].filter(Boolean).join(' · ');
   $('#status').textContent = `${s.sessionActive ? '面试进行中' : '当前未采音'}  ·  ${s.model ? '回答：' + s.model.model : '回答 API 待配置'}  ·  ${s.speech?.configured ? '语音已配置' : '语音转写待配置'}`;
   $('#start').disabled = s.sessionActive;
   $('#stop').disabled = !s.sessionActive;
@@ -30,6 +32,7 @@ async function refresh(restore = false) {
     const generation = s.generation;
     if (generation) {
       state.request = generation.running ? generation.id : null;
+      renderSources(generation.sources);
       state.quick = generation.quick; state.deep = generation.deep; state.lastQuestion = generation.question;
       $('#quick').textContent = generation.quick;
       $('#deep').textContent = generation.deep;
@@ -61,6 +64,7 @@ async function ask(questionOverride) {
   const id = 'studio-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
   state.lastQuestion = question;
   state.request = id; state.quick = ''; state.deep = ''; state.lastError = '';
+  renderSources(null);
   $('#quick').textContent = '正在请求模型…'; $('#deep').textContent = $('#dual').checked ? '正在请求模型…' : '';
   $('#quick-time').textContent = ''; $('#deep-time').textContent = '';
   $('#question-title').textContent = question.slice(0, 70); $('#ask').disabled = true;
@@ -84,6 +88,7 @@ async function selectView(view) {
   const tasks = { interview:['面试助手','实时转写、资料增强、流式回答，在一个 App 中完成。'], written:['笔试 / 截图助手','输入练习题或附加屏幕截图，分析原理、解法与边界情况。'], resume:['简历优化','先导入简历或填写真实经历，再输入目标岗位与修改要求。'], review:['记录与复盘','根据真实问答整理改进方向与后续练习。'] };
   const isTask = !!tasks[view]; $('#work').hidden = !isTask; $('#other').hidden = isTask;
   if (isTask) { $('#task-title').textContent = tasks[view][0]; $('#task-description').textContent = tasks[view][1]; $('#question').placeholder = view === 'resume' ? '例如：根据已导入的简历，优化 BSP 驱动工程师岗位的项目经历，不添加虚构内容。' : '输入问题，或点选左边的转写…'; return; }
+  if (view === 'preparation') await renderPreparation();
   if (view === 'materials') await renderMaterials();
   if (view === 'records') await renderRecords();
   if (view === 'setup') await renderSetup();
@@ -92,6 +97,29 @@ async function selectView(view) {
   if (view === 'pair') await renderPair();
   if (view === 'performance') await renderPerformance();
   if (view === 'privacy') await renderPrivacy();
+}
+
+async function renderPreparation() {
+  await refresh(); const p = state.status.preparation || {};
+  const documents = state.status.documents || [];
+  $('#other').innerHTML = `<h1>面试准备</h1><p>保存一次，下次继续使用。生成回答时，这些背景会发送给你配置的模型。</p><div class="box"><div class="data-grid"><label>目标公司（可选）<input id="prep-company" maxlength="100" value="${escapeText(p.company)}"></label><label>目标岗位（可选）<input id="prep-role" maxlength="150" value="${escapeText(p.role)}"></label></div><label>本次使用的简历<select id="prep-resume"><option value="">暂不指定简历</option>${documents.map(d => `<option value="${escapeText(d.id)}">${escapeText(d.name)}</option>`).join('')}</select></label><p>4,000 字符以内的指定简历会完整加入背景；更长的简历选取相关片段。其他资料继续按相关性使用。</p><button id="prep-materials">导入或管理简历</button><label>岗位描述 JD（可选）<textarea id="prep-jd" maxlength="12000">${escapeText(p.jobDescription)}</textarea></label><details><summary>回答偏好</summary><label>回答语言<select id="prep-language"><option value="Chinese">中文</option><option value="English">English</option></select></label><label>表达方式<select id="prep-style"><option value="natural">自然口语</option><option value="structured">条理分明</option></select></label><label>编程题语言<select id="prep-programming">${['auto','C','C++','Python','Java','JavaScript','TypeScript','Go','Rust','C#','SQL'].map(v => `<option value="${v}">${v === 'auto' ? '按题目要求' : v}</option>`).join('')}</select></label></details><div class="row"><button id="save-preparation" class="primary">保存并返回面试</button></div></div>`;
+  $('#prep-resume').value = p.resumeDocumentId || ''; $('#prep-language').value = p.language || 'Chinese'; $('#prep-style').value = p.style || 'natural'; $('#prep-programming').value = p.programmingLanguage || 'auto';
+  $('#prep-materials').onclick = action(() => selectView('materials'));
+  $('#save-preparation').onclick = action(async () => { await call('preparation', { company: $('#prep-company').value, role: $('#prep-role').value, jobDescription: $('#prep-jd').value, resumeDocumentId: $('#prep-resume').value, language: $('#prep-language').value, style: $('#prep-style').value, programmingLanguage: $('#prep-programming').value }); await refresh(); await selectView('interview'); message('面试准备已保存在本机。'); });
+}
+async function showDocument(source) {
+  const doc = await call('document-text', { id: source.id, ...(source.hash ? { hash: source.hash } : {}) });
+  $('#document-title').textContent = doc.name;
+  $('#document-range').textContent = source.start ? `本次使用的文本区间 ${source.start}–${source.end}` : '资料全文';
+  $('#document-content').textContent = source.start ? doc.text.slice(source.start - 1, source.end) : doc.text;
+  $('#document-dialog').showModal();
+}
+function renderSources(sources) {
+  state.sources = sources || { quick: [], deep: [] };
+  const rows = [...(state.sources.quick || []).map(s => ({ ...s, column: '快答' })), ...(state.sources.deep || []).map(s => ({ ...s, column: '解释' }))];
+  $('#answer-sources').hidden = !rows.length;
+  $('#source-items').innerHTML = rows.map((s,i) => `<button data-source="${i}">${s.column} · ${escapeText(s.name)} · ${s.complete ? '全文' : `${s.start}–${s.end}`}</button>`).join('');
+  $('#source-items').querySelectorAll('[data-source]').forEach(b => b.onclick = action(() => showDocument(rows[+b.dataset.source])));
 }
 
 async function renderPerformance() {
@@ -132,19 +160,23 @@ async function renderConnections() {
     $('#answer-preset').value = current?.baseUrl?.includes('api.openai.com') ? 'openai' : !current || current.baseUrl?.includes('api.deepseek.com') ? 'deepseek' : 'custom';
   }
   fillConnection(); $('#connection-id').onchange = fillConnection;
+  $('#answer-language').value = state.status.preparation?.language || 'Chinese';
   $('#answer-preset').onchange = () => { const preset = $('#answer-preset').value; $('#connection-id').value = ''; $('#connection-key').value = ''; $('#connection-name').value = preset === 'openai' ? 'OpenAI' : preset === 'deepseek' ? 'DeepSeek' : '自定义接口'; $('#connection-url').value = preset === 'openai' ? 'https://api.openai.com/v1' : preset === 'deepseek' ? 'https://api.deepseek.com' : ''; $('#connection-model').value = preset === 'deepseek' ? 'deepseek-flash' : ''; };
   $('#save-connection').onclick = action(async () => {
     const id = $('#connection-id').value;
-    const name = $('#connection-name').value.trim(), baseUrl = $('#connection-url').value.trim(), model = $('#connection-model').value.trim(), apiKey = $('#connection-key').value.trim();
+    let baseUrl = $('#connection-url').value.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
+    const name = $('#connection-name').value.trim(), model = $('#connection-model').value.trim(), apiKey = $('#connection-key').value.trim();
     if (!name || !model) throw new Error('请填写连接名称和模型名称');
     let endpoint; try { endpoint = new URL(baseUrl); } catch { throw new Error('API 地址格式不正确'); }
     if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && ['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname)))) throw new Error('请使用 HTTPS API 地址；本机模型可使用 localhost 的 HTTP 地址。');
+    if (endpoint.pathname === '/') baseUrl = endpoint.origin + '/v1';
     const current = compatible.find(c => c.id === id);
     if (!apiKey && !current?.hasApiKey && !['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname)) throw new Error('请填写此服务的 API Key');
     const result = checked(await native.aiConnectionSave({ ...(id ? { id } : {}), name, type: 'openai', baseUrl, ...(apiKey ? { apiKey } : {}) }));
     $('#connection-key').value = '';
     checked(await native.chatModelSet({ connectionId: result.id, model }));
     checked(await native.setAiResponseLanguage($('#answer-language').value));
+    await call('preparation', { ...state.status.preparation, language: $('#answer-language').value });
     await renderConnections(); message('API 配置已保存在本机，下次打开自动使用。尚未测试连接。');
   });
   $('#test-connection').onclick = action(async () => { const current = await native.chatModelGet(); if (!current.connectionId || !current.model) throw new Error('请先应用回答配置'); message('正在测试回答模型…'); checked(await native.modelTest({ job: 'chat', ...current })); message('回答模型连接测试通过。'); });
@@ -170,17 +202,21 @@ async function renderConnections() {
 }
 async function renderMaterials() {
   await refresh(); const documents = state.status.documents;
-  $('#other').innerHTML = `<h1>简历与知识资料</h1><button id="resume-task">打开简历优化</button><div class="box"><h2>真实背景</h2><p>保存在本机，提问时作为背景送给已配置的模型。不会把示例当成你的经历。</p><textarea id="notes" style="min-height:210px" aria-label="真实背景">${escapeText(state.status.preferences.notes)}</textarea><button id="save-notes" class="primary">保存背景</button></div><div class="box"><div class="row"><h2>资料文件</h2><span class="grow"></span><button id="import" class="primary">导入 PDF / DOCX / TXT / MD</button></div><p>提问时按相关性选取资料，兼顾背景信息与回复速度。</p>${documents.length ? documents.map(d => `<div class="entry"><div class="grow"><b>${escapeText(d.name)}</b><p>${d.characters} 字符</p></div><button data-remove-doc="${d.id}">移除</button></div>`).join('') : '<p class="empty">还没有导入文件。扫描 PDF 需要先做 OCR。</p>'}</div>`;
+  $('#other').innerHTML = `<h1>简历与知识资料</h1><button id="prepare-materials">面试准备</button><button id="import-resume" class="primary">导入并设为简历</button><button id="resume-task">打开简历优化</button><div class="box"><h2>真实背景</h2><p>保存在本机，提问时作为背景送给已配置的模型。不会把示例当成你的经历。</p><textarea id="notes" style="min-height:210px" aria-label="真实背景">${escapeText(state.status.preferences.notes)}</textarea><button id="save-notes" class="primary">保存背景</button></div><div class="box"><div class="row"><h2>资料文件</h2><span class="grow"></span><button id="import" class="primary">导入 PDF / DOCX / TXT / MD</button></div><p>提问时按相关性选取资料，兼顾背景信息与回复速度。</p>${documents.length ? documents.map(d => `<div class="entry"><div class="grow"><b>${escapeText(d.name)}</b><p>${d.characters} 字符${d.id === state.status.preparation?.resumeDocumentId ? ' · 当前简历' : ''}</p></div><button data-view-doc="${d.id}">查看</button><button data-resume-doc="${d.id}">设为简历</button><button data-remove-doc="${d.id}">移除</button></div>`).join('') : '<p class="empty">还没有导入文件。扫描 PDF 需要先做 OCR。</p>'}</div>`;
+  $('#prepare-materials').onclick = action(() => selectView('preparation'));
   $('#resume-task').onclick = action(() => selectView('resume'));
   $('#save-notes').onclick = action(async () => { await call('preferences', { ...state.status.preferences, notes: $('#notes').value }); message('真实背景已保存。'); });
-  $('#import').onclick = action(async () => { const result = await call('import'); if (result.cancelled) return; await renderMaterials(); message(`已导入 ${result.added.length} 份。` + result.failed.map(f => `${f.name}：${f.error}`).join('\n')); });
+  const importFiles = kind => action(async () => { const result = await call('import', { kind }); if (result.cancelled) return; await renderMaterials(); message(`已导入 ${result.added.length} 份，跳过重复 ${result.duplicates?.length || 0} 份。` + result.failed.map(f => `${f.name}：${f.error}`).join('\n')); });
+  $('#import').onclick = importFiles('knowledge'); $('#import-resume').onclick = importFiles('resume');
+  document.querySelectorAll('[data-view-doc]').forEach(b => b.onclick = action(() => showDocument({ id: b.dataset.viewDoc })));
+  document.querySelectorAll('[data-resume-doc]').forEach(b => b.onclick = action(async () => { await call('preparation', { ...state.status.preparation, resumeDocumentId: b.dataset.resumeDoc }); await renderMaterials(); message('已设为当前简历。'); }));
   document.querySelectorAll('[data-remove-doc]').forEach(b => b.onclick = action(async () => { await call('documents', { remove: b.dataset.removeDoc }); await renderMaterials(); }));
 }
 async function renderRecords() {
   const [answers, meetings] = await Promise.all([call('records'), native.getRecentMeetings()]);
   $('#other').innerHTML = `<h1>记录与复盘</h1><div class="box"><h2>本 App 生成的问答</h2>${answers.length ? answers.map((a,i) => `<div class="entry"><div class="grow"><b>${escapeText(a.question)}</b><p>${escapeText(a.date)} · ${escapeText(a.model)}${a.partial ? ' · 部分完成' : ''}</p></div><button data-answer="${i}">查看</button><button data-answer-export="${i}">导出</button></div>`).join('') : '<p class="empty">还没有真实模型成功返回的问答。</p>'}</div><div class="box"><h2>采音会话</h2>${meetings?.length ? meetings.map((m,i) => `<div class="entry"><div class="grow"><b>${escapeText(m.title || '未命名会话')}</b><p>${escapeText(m.date)} · ${escapeText(m.duration)}</p></div><button data-meeting="${i}">导出转写</button><button data-review="${i}">生成复盘</button></div>`).join('') : '<p class="empty">暂无真实会话记录。</p>'}</div>`;
   const answerText = a => `# ${a.question}\n\n${a.date}\n\n## 快答\n${a.answers.quick || ''}\n\n## 展开\n${a.answers.deep || ''}`;
-  document.querySelectorAll('[data-answer]').forEach(b => b.onclick = action(async () => { const a = answers[+b.dataset.answer]; await selectView(a.task); state.quick = a.answers.quick || ''; state.deep = a.answers.deep || ''; $('#quick').textContent = state.quick; $('#deep').textContent = state.deep; $('#question-title').textContent = a.question; }));
+  document.querySelectorAll('[data-answer]').forEach(b => b.onclick = action(async () => { const a = answers[+b.dataset.answer]; await selectView(a.task); state.quick = a.answers.quick || ''; state.deep = a.answers.deep || ''; $('#quick').textContent = state.quick; $('#deep').textContent = state.deep; $('#question-title').textContent = a.question; state.lastQuestion = a.question; $('#dual').checked = !!a.answers.deep; $('#dual').onchange(); renderSources(a.sources); }));
   document.querySelectorAll('[data-answer-export]').forEach(b => b.onclick = action(() => call('export', { text: answerText(answers[+b.dataset.answerExport]), filename: 'interview-answer.md' })));
   async function meetingText(index) { const m = await native.getMeetingDetails(meetings[index].id); return `# ${m.title}\n\n` + (m.transcript || []).map(t => `${t.speaker}：${t.text}`).join('\n\n'); }
   document.querySelectorAll('[data-meeting]').forEach(b => b.onclick = action(async () => call('export', { text: await meetingText(+b.dataset.meeting), filename: 'meeting-transcript.md' })));
@@ -221,6 +257,7 @@ async function renderPair() {
 studio.onEvent(data => {
   if (data.kind === 'transcript') { state.transcripts.set(data.segment.segmentId, data.segment); renderTurns(); $('#partial').textContent = ''; return; }
   if (data.kind === 'reset') { state.transcripts.clear(); renderTurns(); return; }
+  if (data.kind === 'started' && (!state.request || data.id === state.request)) renderSources(data.sources);
   if (data.kind === 'started' && !state.request) { state.request = data.id; state.quick = ''; state.deep = ''; $('#quick').textContent = ''; $('#deep').textContent = ''; $('#question-title').textContent = data.question; $('#ask').disabled = true; }
   if (data.id && data.id !== state.request) return;
   if (data.kind === 'token') { state[data.column] += data.text; scheduleAnswerPaint(); }
@@ -240,6 +277,8 @@ $('#retry-answer').onclick = action(() => { if (!state.lastQuestion) throw new E
 $('#capture-ask').onclick = action(async () => { if (state.request) throw new Error('请先停止当前生成'); if (!state.status?.model) { await selectView('connect'); throw new Error('请先配置支持图片的回答模型'); } state.images = []; renderImages(); await capture(true); if (!state.images.length) return; await ask($('#question').value.trim() || '请识别并解答截图中的题目，先给结论，再说明思路；代码题请给出代码与复杂度。'); });
 $('#stop').onclick = action(async () => { checked(await native.endMeeting()); await refresh(); });
 $('#overlay').onclick = action(async () => { checked(await native.setWindowMode('overlay')); });
+$('#prepare').onclick = action(() => selectView('preparation'));
+$('#document-close').onclick = () => $('#document-dialog').close();
 $('#settings').onclick = action(() => selectView('connect'));
 $('#original').onclick = action(() => call('original'));
 $('#ask').onclick = action(() => ask()); $('#capture').onclick = action(() => capture(true)); $('#full-capture').onclick = action(() => capture(false));
@@ -249,7 +288,7 @@ $('#copy-quick').onclick = action(async () => { await navigator.clipboard.writeT
 $('#copy-deep').onclick = action(async () => { await navigator.clipboard.writeText(state.deep); message('已复制解释。'); });
 $('#export-answer').onclick = action(() => call('export', { text: `# ${$('#question-title').textContent}\n\n## 快答\n${state.quick}\n\n## 展开\n${state.deep}`, filename: 'interview-answer.md' }));
 $('#export-transcript').onclick = action(() => call('export', { text: '# 转写记录\n\n' + [...state.transcripts.values()].map(t => `${t.speaker === 'user' ? '我' : '对方'}：${t.text}`).join('\n\n'), filename: 'interview-transcript.md' }));
-$('#speak').onclick = action(() => { if (!state.quick) throw new Error('还没有可播报的回答'); speechSynthesis.cancel(); const speech = new SpeechSynthesisUtterance(state.quick); speech.lang = 'zh-CN'; speech.onerror = () => message('系统语音播报失败，请检查系统语音资源。'); speechSynthesis.speak(speech); });
+$('#speak').onclick = action(() => { if (!state.quick) throw new Error('还没有可播报的回答'); speechSynthesis.cancel(); const speech = new SpeechSynthesisUtterance(state.quick); speech.lang = state.status?.preparation?.language === 'English' ? 'en-US' : 'zh-CN'; speech.onerror = () => message('系统语音播报失败，请检查系统语音资源。'); speechSynthesis.speak(speech); });
 $('#question').addEventListener('keydown', event => { if (!event.isComposing && event.keyCode !== 229 && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); action(() => ask())(); } });
 $('#dual').onchange();
 document.querySelectorAll('[data-view]').forEach(b => b.onclick = action(() => selectView(b.dataset.view)));

@@ -20,9 +20,9 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
     systemPreferences: { getMediaAccessStatus: () => 'not-determined' }, Menu: { buildFromTemplate: list => list, setApplicationMenu: () => {} } };
   let modelReady = false;
   const cm = { getSttProvider: () => 'deepgram', getDeepgramApiKey: () => speechReady ? 'synthetic-key' : '', resolveModelUse: () => modelReady ? { model: 'fixture-model', connection: { name: 'Fixture', apiKey: 'not-a-real-key' } } : { error: 'Choose a model' } };
-  const contexts = [];
+  const contexts = [], prompts = [];
   const llm = { streamChat: async function* (_question, _images, context, _system, options) {
-    contexts.push(context);
+    contexts.push(context); prompts.push(_system);
     if (failDeep && _system.includes('解释原理')) throw new Error('Synthetic deep-column failure');
     if (holdStream) await new Promise(resolve => options.signal.addEventListener('abort', resolve, { once: true }));
     yield 'Synthetic provider text';
@@ -44,6 +44,8 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const sender = { mainFrame: frame };
   const invoke = (name, data) => handlers.get('studio:' + name)({ senderFrame: frame, sender }, data);
   assert.equal((await invoke('status')).model, null);
+  assert.equal((await invoke('preparation', { language: 'unknown' })).success, false);
+  assert.equal((await invoke('preparation', { resumeDocumentId: 'missing' })).success, false);
   assert.equal((await invoke('status')).privacy.selfTest.version, 'synthetic-saved-version');
   assert.equal((await invoke('privacy-test', { client: 'feishu', version: '', capture: 'screen', result: 'passed' })).success, false);
   assert.equal((await invoke('performance', { mode: 'invented' })).success, false);
@@ -72,6 +74,12 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'studio-state.json'))).notes, 'Invented profile');
   const imported = await invoke('import');assert.equal(imported.added.length, 1);assert.equal(imported.failed.length, 0);
   assert.equal((await invoke('documents'))[0].name, 'fixture.txt');
+  const repeated = await invoke('import', { kind: 'resume' });
+  assert.equal(repeated.added.length, 0); assert.equal(repeated.duplicates.length, 1);
+  assert.equal((await invoke('documents')).length, 1);
+  assert.equal((await invoke('status')).preparation.resumeDocumentId, imported.added[0].id);
+  await invoke('preparation', { company: 'Synthetic company', role: 'Synthetic role', jobDescription: 'Synthetic job description', language: 'English', resumeDocumentId: imported.added[0].id });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'studio-state.json'))).preparation.company, 'Synthetic company');
   for await (const _part of llm.streamChat('An overlay question', [], 'Existing overlay context')) {}
   assert.ok(contexts.at(-1).includes('Invented profile'));
   assert.ok(contexts.at(-1).includes('Invented local document'));
@@ -83,6 +91,11 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   assert.equal((await invoke('records'))[0].answers.quick, 'Synthetic provider text');
   assert.equal((await invoke('status')).generation.quick, 'Synthetic provider text');
   assert.equal((await invoke('status')).generation.running, false);
+  assert.match(prompts.at(-1), /Answer in English/); assert.match(contexts.at(-1), /Synthetic job description/);
+  const sourceInfo = (await invoke('records'))[0].sources.quick.find(s => s.id === imported.added[0].id);
+  assert.equal(sourceInfo.complete, true);
+  assert.match((await invoke('document-text', sourceInfo)).text, /Invented local document/);
+  assert.equal((await invoke('document-text', { ...sourceInfo, hash: 'wrong-version' })).success, false);
   failDeep = true;
   await invoke('ask', { id: 'partial-answer', task: 'interview', question: 'Synthetic dual question', dual: true });
   await new Promise(resolve => setImmediate(resolve));
@@ -100,6 +113,7 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   assert.ok(sent.some(([, data]) => data?.id === 'cancel-on-reset' && data.kind === 'done' && data.ok === false));
   modelReady = false;
   await invoke('documents', { remove: imported.added[0].id });assert.equal((await invoke('documents')).length, 0);
+  assert.equal((await invoke('status')).preparation.resumeDocumentId, '');
   const answer = await invoke('ask', { id: 'no-model', task: 'interview', question: 'test' });
   assert.equal(answer.success, false);assert.equal(answer.error, 'Choose a model');
 });

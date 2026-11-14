@@ -55,7 +55,7 @@ function endpointFor(baseUrl) {
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(local && url.protocol === 'http:'))) throw new Error('模型地址必须是 HTTPS，或本机 HTTP 服务');
   const root = url.href.replace(/\/+$/, '') + (url.pathname === '/' ? '/v1' : '');
-  return root + '/chat/completions';
+  return /\/chat\/completions$/i.test(url.pathname.replace(/\/+$/, '')) ? url.href.replace(/\/+$/, '') : root + '/chat/completions';
 }
 
 async function* streamOpenAI({ connection, model, question, context, system, signal, column = 'quick', mode = 'fast', fetchImpl = fetch, firstTokenMs, idleMs = 15000, onStage = () => {} }) {
