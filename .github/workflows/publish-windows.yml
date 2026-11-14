@@ -1,0 +1,89 @@
+name: Publish Windows Installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Windows Desktop Build run
+        required: true
+        default: '43550681373'
+      source_sha:
+        description: Exact production code commit of that build
+        required: true
+        default: '9ab2fba336ac23c976c9c3db4bff26f3dc50be47'
+      version:
+        description: Existing binary version
+        required: true
+        default: '0.7.0'
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-windows
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ inputs.run_id }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Validate existing build and release inputs
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          for key, pattern in [('RUN_ID', r'[0-9]+'), ('SOURCE_SHA', r'[0-9a-f]{40}'), ('VERSION', r'[0-9]+\.[0-9]+\.[0-9]+')]:
+              if not re.fullmatch(pattern, os.environ[key]):
+                  raise SystemExit('Invalid ' + key)
+          endpoint = f"repos/{os.environ['GH_REPO']}/actions/runs/{os.environ['RUN_ID']}"
+          run = json.loads(subprocess.check_output(['gh', 'api', endpoint]))
+          assert run['conclusion'] == 'success' and run['status'] == 'completed', 'Build must pass first'
+          assert run['name'] == 'Windows Desktop Build', 'Unexpected build workflow'
+          assert run['head_sha'] == os.environ['SOURCE_SHA'], 'Source revision differs from reviewed build'
+          assert run['repository']['full_name'] == os.environ['GH_REPO'], 'Unexpected source repository'
+          PY
+      - name: Download the verified Windows artifact on GitHub
+        run: gh run download "$RUN_ID" --name InterviewStudio-Windows-x64 --dir installers
+      - name: Verify both executables against build checksums
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          root = pathlib.Path('installers')
+          expected = {f"InterviewStudio-{kind}-{os.environ['VERSION']}-x64.exe" for kind in ['Setup', 'Portable']}
+          hashes = {}
+          for line in (root / 'SHA256SUMS.txt').read_text(encoding='utf-8-sig').splitlines():
+              match = re.fullmatch(r'([0-9a-fA-F]{64})  (.+)', line)
+              assert match, 'Invalid checksum line'
+              digest, name = match.groups()
+              assert name in expected and name not in hashes, 'Unexpected or duplicate file'
+              hashes[name] = digest.lower()
+          assert set(hashes) == expected, 'Both installer and portable are required'
+          for name, digest in hashes.items():
+              with (root / name).open('rb') as stream:
+                  assert hashlib.file_digest(stream, 'sha256').hexdigest() == digest, name + ': checksum differs'
+              print(name, (root / name).stat().st_size, 'bytes: SHA256 passed')
+          report = json.loads((root / 'windows-verification.json').read_text())
+          assert report['platform'] == 'win32' and report['arch'] == 'x64'
+          assert report['nativeBrowserStartup'] == 'passed' and report['packagedDependencies'] == 'passed'
+          PY
+      - name: Publish individual files without rebuilding
+        run: |
+          tag="v$VERSION"
+          cat > release-notes.md <<'NOTES'
+          Windows 10/11 x64：通常只需下载 Setup.exe 安装版；Portable.exe 是可选的免安装版。
+
+          本次仅重新分发已通过检查的原始构建文件，SHA256 与构建记录一致。无需下载包含两份程序的 Actions 压缩包。
+
+          这是开发版本；真实设备音频、飞书/腾讯会议共享保护及真实模型效果尚待实测。
+          NOTES
+          printf '\n源代码：%s\n构建记录：https://github.com/%s/actions/runs/%s\n' "$SOURCE_SHA" "$GH_REPO" "$RUN_ID" >> release-notes.md
+          gh release create "$tag" --target "$SOURCE_SHA" --title "面试工作室 $VERSION" --notes-file release-notes.md --draft
+          gh release upload "$tag" "installers/InterviewStudio-Setup-$VERSION-x64.exe" "installers/InterviewStudio-Portable-$VERSION-x64.exe" installers/SHA256SUMS.txt installers/windows-verification.json
+          gh release edit "$tag" --draft=false --latest
