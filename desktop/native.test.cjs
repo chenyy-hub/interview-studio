@@ -19,7 +19,7 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
     ipcMain: { handle: (name, fn) => handlers.set(name, fn) }, dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [source] }) },
     systemPreferences: { getMediaAccessStatus: () => 'not-determined' }, Menu: { buildFromTemplate: list => list, setApplicationMenu: () => {} } };
   let modelReady = false;
-  const cm = { getSttProvider: () => 'deepgram', getDeepgramApiKey: () => speechReady ? 'synthetic-key' : '', resolveModelUse: () => modelReady ? { model: 'fixture-model', connection: { name: 'Fixture', apiKey: 'not-a-real-key' } } : { error: 'Choose a model' } };
+  const cm = { credentials: {}, getAiResponseLanguage: () => 'English', getSttProvider: () => 'deepgram', getDeepgramApiKey: () => speechReady ? 'synthetic-key' : '', resolveModelUse: () => modelReady ? { model: 'fixture-model', connection: { name: 'Fixture', apiKey: 'not-a-real-key' } } : { error: 'Choose a model' } };
   const contexts = [], prompts = [];
   const llm = { streamChat: async function* (_question, _images, context, _system, options) {
     contexts.push(context); prompts.push(_system);
@@ -44,6 +44,7 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const sender = { mainFrame: frame };
   const invoke = (name, data) => handlers.get('studio:' + name)({ senderFrame: frame, sender }, data);
   assert.equal((await invoke('status')).model, null);
+  assert.equal((await invoke('status')).preparation.language, 'Chinese');
   assert.equal((await invoke('preparation', { language: 'unknown' })).success, false);
   assert.equal((await invoke('preparation', { resumeDocumentId: 'missing' })).success, false);
   assert.equal((await invoke('status')).privacy.selfTest.version, 'synthetic-saved-version');

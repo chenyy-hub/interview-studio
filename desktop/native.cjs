@@ -25,7 +25,9 @@ function install(appState) {
   try { store.audio = audioPreferences(store.audio); } catch { store.audio = { backend: process.platform === 'win32' ? 'wasapi' : 'sck', captureMicrophone: false, inputDeviceId: 'default', outputDeviceId: 'default' }; }
   store.performance = { mode: store.performance?.mode === 'balanced' ? 'balanced' : 'fast' };
   store.privacy = { enabled: store.privacy?.enabled !== false, selfTest: store.privacy?.selfTest || null };
-  const language = cm.getAiResponseLanguage?.() === 'English' ? 'English' : 'Chinese';
+  // The upstream getter defaults to English even when nothing was saved.
+  // Migrate only an explicit stored preference, keeping first use Chinese.
+  const language = cm.credentials?.aiResponseLanguage === 'English' ? 'English' : 'Chinese';
   try { store.preparation = preparation(store.preparation || {}, { language }); }
   catch { store.preparation = preparation({}, { language }); }
   const contextIndex = new ContextIndex(store.documents, store.notes);
