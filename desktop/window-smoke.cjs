@@ -4,7 +4,16 @@
 // Use the real packaged WindowHelper and OS windows; never start a meeting.
 async function run() {
   const assert = require('node:assert/strict');
-  const { app, screen } = require('electron');
+  const { app, screen, ipcMain, BrowserWindow } = require('electron');
+  const path = require('node:path');
+  const fixture = { platform: process.platform, speech: { configured: false }, credentialStorage: { mode: 'local' }, transcripts: [],
+    appearance: { theme: 'light', overlayOpacity: 0, overlayTextOpacity: 0.35, overlayFontSize: 18 }, floating: { mode: 'overlay', collapsed: false, shortcuts: [] } };
+  ipcMain.handle('studio:status', () => fixture);
+  ipcMain.handle('studio:appearance', (_event, value) => {
+    fixture.appearance = value;
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('studio:event', { kind: 'appearance', value });
+    return { success: true };
+  });
   const { WindowHelper } = require('../dist-electron/electron/helpers/WindowHelper.js');
   const helper = new WindowHelper({ isQuitting: () => true, getUndetectable: () => false,
     getIsMeetingActive: () => false, getOverlayMousePassthrough: () => false,
@@ -14,8 +23,28 @@ async function run() {
   const launcher = helper.getLauncherWindow(), overlay = helper.getOverlayWindow();
   assert.ok(launcher && overlay, 'The real launcher and overlay must be created');
   launcher.webContents.stop(); overlay.webContents.stop();
-  // Test windows show a local inert document, without provider requests or app IPC.
-  await Promise.all([launcher.loadURL('about:blank'), overlay.loadURL('about:blank')]);
+  // Exercise the actual floating preload, renderer and CSP with synthetic state.
+  // No provider, microphone or screen-capture API is called by this fixture.
+  await Promise.all([launcher.loadURL('about:blank'), overlay.loadURL(require('node:url').pathToFileURL(path.join(app.getAppPath(),'desktop/overlay.html')).href)]);
+  const floatingUI = await overlay.webContents.executeJavaScript(`(async () => {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (document.documentElement.style.getPropertyValue('--text-alpha') === '0.35') break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    return { background: getComputedStyle(document.querySelector('#floating-window')).backgroundColor,
+      text: getComputedStyle(document.querySelector('#answer-text')).opacity,
+      font: getComputedStyle(document.querySelector('#answer-text')).fontSize,
+      ghost: document.querySelector('#floating-window').dataset.ghost,
+      ready: typeof window.studio?.invoke === 'function' && !!document.querySelector('#quick-answer').onclick,
+      notice: document.querySelector('#floating-notice').textContent };
+  })()`);
+  assert.equal(floatingUI.ready, true);
+  assert.equal(floatingUI.text, '0.35'); assert.equal(floatingUI.font, '18px');
+  assert.equal(floatingUI.ghost, 'true'); assert.match(floatingUI.background, /rgba\(.+, 0\)/);
+  assert.equal(floatingUI.notice, '');
+  console.log('STUDIO_FLOATING_CHECK_OK: actual preload/renderer/CSP, zero background, independent text alpha and font');
+  await overlay.loadURL('about:blank');
   assert.equal(launcher.isClosable(), true);
   assert.equal(launcher.isMinimizable(), true);
   assert.equal(launcher.isMaximizable(), true);
