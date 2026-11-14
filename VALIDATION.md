@@ -28,6 +28,13 @@ v0.7 生产代码对应提交 9ab2fba。Windows 最终构建成功，用时 15 �
 及 windows-verification.json。构建记录：
 https://github.com/chenyy-hub/interview-studio/actions/runs/43550681373
 
+2026-11-14 已将上述原始 EXE 单独发布到 GitHub Releases，避免每次下载
+包含两种程序的 647 MB 构建压缩包。安装版 353,025,508 字节；便携版
+294,008,245 字节。转存前核对成功构建的代码提交、两个 EXE 的 SHA256
+及运行验证报告；未重新编译或更改版本。发布文件持续保留。
+发布页：https://github.com/chenyy-hub/interview-studio/releases/tag/v0.7.0
+发布记录：https://github.com/chenyy-hub/interview-studio/actions/runs/43568991323
+
 Windows 检查仅证明浏览器进程、模块依赖及合成配置/音频分支可用，不是
 完整会议实测。上一个已通过的 v0.6 构建记录仍保留：
 https://github.com/chenyy-hub/interview-studio/actions/runs/43463841916

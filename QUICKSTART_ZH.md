@@ -27,12 +27,15 @@ API 配置保存在本机用户目录的加密文件中，密钥也在同一目�
 
 ## Windows 下载
 
-打开已通过的构建页：
+登录有权限的 GitHub 账号，直接下载安装版：
+https://github.com/chenyy-hub/interview-studio/releases/download/v0.7.0/InterviewStudio-Setup-0.7.0-x64.exe
+
+运行下载的 `.exe` 即可安装。通常只需安装版；便携版是另一种使用方式，无需两份都下载。
+发布页：https://github.com/chenyy-hub/interview-studio/releases/tag/v0.7.0
+
+这些文件与已通过的 v0.7 构建 SHA256 一致，单独上传到 Releases 后持续保留，
+无需下载包含两份程序的 Actions 压缩包。构建和验证记录：
 https://github.com/chenyy-hub/interview-studio/actions/runs/43550681373
 
-登录有权限的 GitHub 账号，在页面底部 Artifacts 下载
-`InterviewStudio-Windows-x64`。解压后，安装使用
-`InterviewStudio-Setup-0.7.0-x64.exe`；免安装使用
-`InterviewStudio-Portable-0.7.0-x64.exe`。该构建产物保留 14 天，下载后请自行保留。
 卸载安装版默认保留本机资料与 API 配置。两种版本均为开发构建，尚未完成
 Windows 代码签名与真实设备/会议验证。

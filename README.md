@@ -49,6 +49,12 @@ tests, packaging or a successful startup.
 
 ## Windows
 
+Download the individual Setup executable from the private repository's
+[v0.7.0 release](https://github.com/chenyy-hub/interview-studio/releases/tag/v0.7.0).
+The portable executable is an alternative; users do not need both. Release
+assets retain the original verified build checksums and do not expire with
+the Actions artifact. Repository access is required.
+
 Run the **Windows Desktop Build** workflow. It checks out the pinned upstream,
 builds its renderer/main/native addon, applies this extension, and creates a
 per-user installer plus a portable x64 executable. Packaged browser startup and
