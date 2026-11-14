@@ -48,6 +48,13 @@ jobs:
           assert run['name'] == 'Windows Desktop Build', 'Unexpected build workflow'
           assert run['head_sha'] == os.environ['SOURCE_SHA'], 'Source revision differs from reviewed build'
           assert run['repository']['full_name'] == os.environ['GH_REPO'], 'Unexpected source repository'
+          # A trusted publisher creates the tag first. GITHUB_TOKEN must not
+          # implicitly create refs pointing across workflow-file revisions.
+          tag_endpoint = f"repos/{os.environ['GH_REPO']}/git/ref/tags/v{os.environ['VERSION']}"
+          ref = json.loads(subprocess.check_output(['gh', 'api', tag_endpoint]))
+          assert ref['object']['type'] == 'commit' and ref['object']['sha'] == os.environ['SOURCE_SHA'], 'Release tag must point to the verified production commit'
+          release = json.loads(subprocess.check_output(['gh', 'release', 'view', f"v{os.environ['VERSION']}", '--json', 'isDraft,tagName']))
+          assert release['isDraft'] is True, 'A trusted publisher must create the draft release first'
           PY
       - name: Download the verified Windows artifact on GitHub
         run: gh run download "$RUN_ID" --name InterviewStudio-Windows-x64 --dir installers
@@ -96,6 +103,6 @@ jobs:
           这是开发版本；真实设备音频、飞书/腾讯会议共享保护及真实模型效果尚待实测。
           NOTES
           printf '\n源代码：%s\n构建记录：https://github.com/%s/actions/runs/%s\n' "$SOURCE_SHA" "$GH_REPO" "$RUN_ID" >> release-notes.md
-          gh release create "$tag" --target "$SOURCE_SHA" --title "面试工作室 $VERSION" --notes-file release-notes.md --draft
-          gh release upload "$tag" installers/InterviewStudio-Windows-Setup.exe installers/InterviewStudio-Windows-Portable.exe installers/SHA256SUMS.txt installers/windows-verification.json
-          gh release edit "$tag" --draft=false --latest
+          # Keep release creation/publication with the authorized publisher.
+          # The job only uploads verified files into the already-created draft.
+          gh release upload "$tag" installers/InterviewStudio-Windows-Setup.exe installers/InterviewStudio-Windows-Portable.exe installers/SHA256SUMS.txt installers/windows-verification.json --clobber
