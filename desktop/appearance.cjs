@@ -2,8 +2,9 @@
 
 function appearance(value = {}) {
   const theme = value.theme ?? 'light', overlayOpacity = value.overlayOpacity ?? 0.88;
+  // Legacy key now controls the whole floating surface, preserving saved values.
   const overlayTextOpacity = value.overlayTextOpacity ?? 1, overlayFontSize = value.overlayFontSize ?? 15;
-  if (!['light', 'dark'].includes(theme) || typeof overlayOpacity !== 'number' || !Number.isFinite(overlayOpacity) || overlayOpacity < 0 || overlayOpacity > 1 || typeof overlayTextOpacity !== 'number' || !Number.isFinite(overlayTextOpacity) || overlayTextOpacity < 0.15 || overlayTextOpacity > 1 || !Number.isInteger(overlayFontSize) || overlayFontSize < 12 || overlayFontSize > 24) throw new Error('背景范围 0%–100%，文字范围 15%–100%，字号范围 12–24');
+  if (!['light', 'dark'].includes(theme) || typeof overlayOpacity !== 'number' || !Number.isFinite(overlayOpacity) || overlayOpacity < 0 || overlayOpacity > 1 || typeof overlayTextOpacity !== 'number' || !Number.isFinite(overlayTextOpacity) || overlayTextOpacity < 0.15 || overlayTextOpacity > 1 || !Number.isInteger(overlayFontSize) || overlayFontSize < 12 || overlayFontSize > 24) throw new Error('背景范围 0%–100%，整体范围 15%–100%，字号范围 12–24');
   return { theme, overlayOpacity: Math.round(overlayOpacity * 100) / 100, overlayTextOpacity: Math.round(overlayTextOpacity * 100) / 100, overlayFontSize };
 }
 

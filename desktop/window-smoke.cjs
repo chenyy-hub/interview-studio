@@ -29,7 +29,7 @@ async function run() {
   const floatingUI = await overlay.webContents.executeJavaScript(`(async () => {
     const deadline = Date.now() + 5000;
     while (Date.now() < deadline) {
-      if (document.documentElement.style.getPropertyValue('--text-alpha') === '0.35') break;
+      if (document.documentElement.style.getPropertyValue('--ui-alpha') === '0.35') break;
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     return { background: getComputedStyle(document.querySelector('#floating-window')).backgroundColor,
@@ -40,10 +40,43 @@ async function run() {
       notice: document.querySelector('#floating-notice').textContent };
   })()`);
   assert.equal(floatingUI.ready, true);
-  assert.equal(floatingUI.text, '0.35'); assert.equal(floatingUI.font, '18px');
+  assert.equal(floatingUI.text, '1'); assert.equal(floatingUI.font, '18px');
   assert.equal(floatingUI.ghost, 'true'); assert.match(floatingUI.background, /rgba\(.+, 0\)/);
   assert.equal(floatingUI.notice, '');
-  console.log('STUDIO_FLOATING_CHECK_OK: actual preload/renderer/CSP, zero background, independent text alpha and font');
+  const appearanceSnapshot = () => overlay.webContents.executeJavaScript(`(() => {
+    const style = selector => getComputedStyle(document.querySelector(selector));
+    return { alpha: style('#floating-window').opacity,
+      controls: ['header','.answer-tabs','footer','#question-form','#quick-answer'].map(selector => ({
+        alpha: style(selector).opacity, background: style(selector).backgroundColor, border: style(selector).borderTopColor
+      })) };
+  })()`);
+  const baseline = await appearanceSnapshot();
+  assert.equal(baseline.alpha, '0.35', 'Saved opacity must apply once to the entire floating UI');
+  for (const control of baseline.controls) {
+    assert.equal(control.alpha, '1', 'Controls must inherit the same group alpha without double fading');
+    assert.match(control.background, /rgba\(.+, 0\)/);
+    assert.match(control.border, /rgba\(.+, 0\)/);
+  }
+  // Force actual Chromium hover states, then focus the composer. Neither may
+  // reveal chrome or increase the saved group alpha, on either desktop OS.
+  overlay.webContents.debugger.attach('1.3');
+  try {
+    await overlay.webContents.debugger.sendCommand('DOM.enable');
+    await overlay.webContents.debugger.sendCommand('CSS.enable');
+    const { root } = await overlay.webContents.debugger.sendCommand('DOM.getDocument');
+    for (const selector of ['#floating-window','#quick-answer']) {
+      const { nodeId } = await overlay.webContents.debugger.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector });
+      await overlay.webContents.debugger.sendCommand('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['hover'] });
+    }
+    assert.deepEqual(await appearanceSnapshot(), baseline, 'Hover must not brighten the window or controls');
+    await overlay.webContents.executeJavaScript(`document.querySelector('#question-input').focus()`);
+    assert.deepEqual(await appearanceSnapshot(), baseline, 'Typing focus must not reveal bars');
+    await overlay.webContents.executeJavaScript(`document.querySelector('#readable-editing').click()`);
+    assert.equal((await appearanceSnapshot()).alpha, '1', 'Clear editing requires an explicit click');
+    await overlay.webContents.executeJavaScript(`document.querySelector('#readable-editing').click()`);
+    assert.deepEqual(await appearanceSnapshot(), baseline, 'Ending editing must restore the saved opacity');
+  } finally { overlay.webContents.debugger.detach(); }
+  console.log('STUDIO_FLOATING_CHECK_OK: actual preload/renderer/CSP, uniform alpha, unchanged hover/focus, explicit editing and font');
   await overlay.loadURL('about:blank');
   assert.equal(launcher.isClosable(), true);
   assert.equal(launcher.isMinimizable(), true);

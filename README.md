@@ -1,15 +1,21 @@
 # Interview Studio
 
 Chinese desktop interview/meeting assistant, based on the pinned Pika 3.4.0
-runtime, with the editable extension under `desktop/`. Version: **0.8.0**.
+runtime, with the editable extension under `desktop/`. Version: **0.8.1**.
 
 ## This update
 
+- Floating text and controls now share one saved overall opacity. Hovering or
+  focusing the composer no longer reveals bright top/bottom bars. The zero
+  background preset removes the main panel's fills, borders and shadow.
+- Explicit **清晰编辑** temporarily restores readability; ending editing,
+  hiding the overlay or leaving floating mode restores the saved opacity.
+  Existing opacity preferences are preserved without reconfiguration.
 - Native Windows title bar and desktop-fit sizing, with real packaged window
   maximize/restore, minimize and close checks before installer compression.
 - Warm-white and charcoal palettes, simple provider presets and a Chinese
   floating interface sharing the same transcript, answer stream and history.
-- Independently saved floating background (0–100%), text (15–100%) and font size;
+- Independently saved floating background (0–100%), overall opacity (15–100%) and font size;
   transparent-text preset, collapse, drag/resize, click-through and tray recovery.
 - Global floating/quick-answer/screenshot/scroll shortcuts with conflict status.
   Upstream mode changes now release only their own shortcuts, preserving recovery.
@@ -78,6 +84,11 @@ build and checksums, and uploads individual files. The publisher checks the
 assets and publishes the draft. No long-lived personal token is stored in Actions.
 
 ## macOS local build
+
+Apple Silicon users can download
+[the latest Mac ZIP](https://github.com/chenyy-hub/interview-studio/releases/latest/download/InterviewStudio-macOS-arm64.zip).
+Quit the previous app, unzip and replace InterviewStudio.app. This is an arm64
+build; it is not an Intel Mac package. Both platform downloads share a release.
 
 ```sh
 python3 desktop/build_macos.py /path/to/official/Pika.app /path/to/new/InterviewStudio.app

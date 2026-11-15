@@ -1,7 +1,7 @@
 (() => {
 'use strict';
 const $ = selector => document.querySelector(selector), bridge = window.studio, native = window.electronAPI;
-const state = { request: null, quick: '', deep: '', tab: 'quick', lastQuestion: '', transcripts: new Map(), images: [], first: {}, status: null };
+const state = { request: null, quick: '', deep: '', tab: 'quick', lastQuestion: '', transcripts: new Map(), images: [], first: {}, status: null, editing: false };
 const escapeText = text => String(text ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function call(name,data) { const result = await bridge.invoke(name,data); if (result?.success === false) throw new Error(result.error); return result; }
 const notice = text => { $('#floating-notice').textContent = text || ''; };
@@ -10,7 +10,8 @@ function applyAppearance(value = {}) {
   const root = document.documentElement;
   root.dataset.theme = value.theme || 'light';
   root.style.setProperty('--background-alpha',String(value.overlayOpacity ?? 0.88));
-  root.style.setProperty('--text-alpha',String(value.overlayTextOpacity ?? 1));
+  // Retain the saved preference key so existing installations keep their value.
+  root.style.setProperty('--ui-alpha',String(value.overlayTextOpacity ?? 1));
   root.style.setProperty('--answer-size',(value.overlayFontSize ?? 15)+'px');
   $('#floating-window').dataset.ghost = String((value.overlayOpacity ?? 0.88) === 0);
   $('#background-opacity').value = Math.round((value.overlayOpacity ?? 0.88)*100);
@@ -20,7 +21,14 @@ function applyAppearance(value = {}) {
   $('#text-value').textContent = $('#text-opacity').value+'%';
   $('#font-value').textContent = $('#font-size').value;
 }
+function setEditing(enabled) {
+  state.editing = enabled;
+  $('#floating-window').classList.toggle('is-editing',enabled);
+  $('#readable-editing').textContent = enabled ? '结束编辑' : '清晰编辑';
+  $('#readable-editing').setAttribute('aria-pressed',String(enabled));
+}
 function renderFloating(value = {}) {
+  if (value.mode !== 'overlay' || value.visible === false) setEditing(false);
   $('#floating-window').classList.toggle('is-collapsed',!!value.collapsed);
   $('#collapse').textContent = value.collapsed ? '⌄' : '⌃';
   $('#collapse').setAttribute('aria-label',value.collapsed ? '展开悬浮窗' : '收起悬浮窗');
@@ -99,6 +107,7 @@ $('#copy-answer').onclick=action(async()=>{if(!state[state.tab]) throw new Error
 $('#question-form').onsubmit=event=>{event.preventDefault();void action(()=>ask())();};
 $('#question-input').addEventListener('keydown',event=>{if(!event.isComposing && event.keyCode!==229 && event.key==='Enter' && !event.shiftKey){event.preventDefault();void action(()=>ask())();}});
 $('#panel-settings').onclick=action(async()=>{if(state.status?.floating?.collapsed) await call('floating',{action:'collapse',enabled:false});$('#settings-panel').hidden=!$('#settings-panel').hidden;});$('#close-settings').onclick=()=>{$('#settings-panel').hidden=true;};
+$('#readable-editing').onclick=()=>setEditing(!state.editing);
 $('#close-overlay').onclick=action(()=>call('floating',{action:'hide'}));$('#open-main').onclick=action(()=>call('floating',{action:'main'}));
 $('#open-app-settings').onclick=action(()=>call('floating',{action:'settings'}));
 $('#listen').onclick=action(()=>call('floating',{action:'prepare-session'}));
@@ -107,7 +116,7 @@ $('#click-through').onclick=action(async()=>{await call('floating',{action:'pass
 function readAppearance() {return {...state.status?.appearance,overlayOpacity:Number($('#background-opacity').value)/100,overlayTextOpacity:Number($('#text-opacity').value)/100,overlayFontSize:Number($('#font-size').value)};}
 async function saveAppearance(value=readAppearance()) {await call('appearance',value);if(state.status) state.status.appearance=value;applyAppearance(value);}
 for(const id of ['background-opacity','text-opacity','font-size']) {$('#'+id).oninput=()=>applyAppearance(readAppearance());$('#'+id).onchange=action(()=>saveAppearance());}
-$('#ghost-preset').onclick=action(()=>saveAppearance({...state.status.appearance,overlayOpacity:0,overlayTextOpacity:0.35}));
+$('#ghost-preset').onclick=action(()=>{setEditing(false);return saveAppearance({...state.status.appearance,overlayOpacity:0,overlayTextOpacity:0.35});});
 $('#clear-preset').onclick=action(()=>saveAppearance({...state.status.appearance,overlayOpacity:0.92,overlayTextOpacity:1}));
 window.addEventListener('keydown',event=>{if(event.key==='Escape') $('#settings-panel').hidden=true;});
 window.addEventListener('unhandledrejection',event=>{notice(event.reason?.message || '操作失败');event.preventDefault();});

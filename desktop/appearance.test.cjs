@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { appearance, upstreamCSS, createAppearance } = require('./appearance.cjs');
 
-test('appearance defaults to light, validates bounds and changes background alpha without dimming text', () => {
+test('appearance preserves saved fields and the advanced upstream palette changes background without dimming text', () => {
   assert.deepEqual(appearance(), { theme: 'light', overlayOpacity: 0.88, overlayTextOpacity: 1, overlayFontSize: 15 });
   assert.equal(appearance({ overlayOpacity: 0, overlayTextOpacity: 0.35 }).overlayOpacity, 0);
   for (const overlayOpacity of [NaN, Infinity, -0.1, 1.1, '0.8']) assert.throws(() => appearance({ overlayOpacity }));

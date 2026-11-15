@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PRODUCT = "InterviewStudio"
-VERSION = "0.8.0"
+VERSION = "0.8.1"
 
 def replace_once(text, old, new):
     if text.count(old) != 1:

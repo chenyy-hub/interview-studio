@@ -6,15 +6,12 @@ on:
       run_id:
         description: Successful Windows Desktop Build run
         required: true
-        default: '43575457925'
       source_sha:
         description: Exact production code commit of that build
         required: true
-        default: 'c0c8c7f88c1b19ce15fd29bf6bd954a2f753b1ab'
       version:
         description: Existing binary version
         required: true
-        default: '0.8.0'
 
 permissions:
   actions: read
