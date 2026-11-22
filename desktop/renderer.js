@@ -101,6 +101,7 @@ function renderTurns() {
   if (follow) container.scrollTop = container.scrollHeight;
 }
 async function ask(questionOverride, taskOverride) {
+  if (state.imageBusy) throw new Error('图片处理尚未完成，请稍候再提问');
   if (state.request) { message('当前正在生成，可以先停止。'); return; }
   const recent = [...state.transcripts.values()].filter(t => t.speaker !== 'user' && t.text?.trim()).at(-1)?.text || '';
   const question = typeof questionOverride === 'string' ? questionOverride : $('#question').value.trim() || (state.view === 'written' ? state.images.length ? '请识别并分析附图中的练习题，给出答案、推理和检查方法。' : '' : state.themPartial || recent);
@@ -118,24 +119,39 @@ async function ask(questionOverride, taskOverride) {
   $('#question-title').textContent = question.slice(0, 70); $('#ask').disabled = true;
   state.extracting = taskOverride === 'ocr';
   try { await call('ask', { id, task: taskOverride || (['interview','written','resume','review'].includes(state.view) ? state.view : 'interview'), question, dual: state.extracting ? false : $('#dual').checked, programmingLanguage: state.view === 'written' ? $('#written-language').value : undefined, images: state.view === 'written' && $('#written-input-mode').value === 'text' ? [] : state.images.map(i => i.path) }); }
-  catch (error) { state.request = null; $('#ask').disabled = false; $('#quick').textContent = ''; $('#deep').textContent = ''; throw error; }
+  catch (error) { state.request = null; paintImageControls(); $('#quick').textContent = ''; $('#deep').textContent = ''; throw error; }
 }
 function renderImages() {
   $('#attachments').innerHTML = state.images.map((image, i) => `<figure><img src="${escapeText(image.preview)}" alt="截图附件"><figcaption><button data-remove-image="${i}">移除截图 ${i + 1}</button></figcaption></figure>`).join('');
-  document.querySelectorAll('[data-remove-image]').forEach(b => b.onclick = () => { state.images.splice(+b.dataset.removeImage, 1); renderImages(); });
+  document.querySelectorAll('[data-remove-image]').forEach(b => b.onclick = () => { if (state.imageBusy) return; state.images.splice(+b.dataset.removeImage, 1); state.ocrPaths = null; renderImages(); });
+  paintImageControls();
+}
+function paintImageControls() {
+  for (const id of ['capture','full-capture','repeat-capture','capture-ask','import-question-image','paste-question-image','recognize-question','retry-answer']) $('#' + id).disabled = !!state.imageBusy;
+  document.querySelectorAll('[data-remove-image]').forEach(b => { b.disabled = !!state.imageBusy; });
+  $('#ask').disabled = !!state.imageBusy || !!state.request;
+}
+async function withImageOperation(run) {
+  if (state.imageBusy) throw new Error('图片处理尚未完成，请稍候再操作');
+  state.imageBusy = true; paintImageControls();
+  try { return await run(); }
+  finally { state.imageBusy = false; paintImageControls(); }
 }
 async function capture(area, repeat = false) {
-  if (state.images.length >= 4) throw new Error('一次最多附加 4 张截图');
-  const result = await call('capture', { area, repeat });
-  if (!result.cancelled) { state.images.push(result); renderImages(); message('截图已附加，生成回答时才发送给模型。需要支持图片的模型。'); }
+  return withImageOperation(async () => {
+    if (state.images.length >= 4) throw new Error('一次最多附加 4 张截图');
+    const result = await call('capture', { area, repeat });
+    if (!result.cancelled) { state.images.push(result); state.ocrPaths = null; renderImages(); message('截图已附加，生成回答时才发送给模型。需要支持图片的模型。'); }
+  });
 }
 async function selectView(view) {
+  if (state.imageBusy && state.view !== view) throw new Error('图片处理尚未完成，请稍候再切换任务');
   const tasksWithDrafts = ['interview','written','resume','review'];
   if (tasksWithDrafts.includes(view) && state.task !== view) {
     if (state.request) throw new Error('请先停止或等待当前回答完成，再切换任务');
     taskDrafts.set(state.task, { question: $('#question').value, images: [...state.images], quick: state.quick, deep: state.deep, lastQuestion: state.lastQuestion, sources: state.sources, dual: $('#dual').checked, inputMode: $('#written-input-mode').value, code: $('#written-language').value });
     const draft = taskDrafts.get(view) || { question: '', images: [], quick: '', deep: '', lastQuestion: '', dual: false, inputMode: 'images', code: 'auto' };
-    Object.assign(state, { images: [...draft.images], quick: draft.quick, deep: draft.deep, lastQuestion: draft.lastQuestion, task: view });
+    Object.assign(state, { images: [...draft.images], ocrPaths: null, quick: draft.quick, deep: draft.deep, lastQuestion: draft.lastQuestion, task: view });
     $('#question').value = draft.question; $('#dual').checked = draft.dual; $('#dual').onchange();
     $('#written-input-mode').value = draft.inputMode; $('#written-language').value = draft.code;
     paintAnswers(); renderImages(); renderSources(draft.sources); $('#question-title').textContent = draft.lastQuestion || '回答';
@@ -344,7 +360,18 @@ async function renderRecords() {
   const [answers, meetings] = await Promise.all([call('records'), native.getRecentMeetings()]);
   $('#other').innerHTML = `<h1>记录与复盘</h1><div class="box"><h2>本 App 生成的问答</h2>${answers.length ? answers.map((a,i) => `<div class="entry"><div class="grow"><b>${escapeText(a.question)}</b><p>${escapeText(a.date)} · ${escapeText(a.model)}${a.partial ? ' · 部分完成' : ''}</p></div><button data-answer="${i}">查看</button><button data-answer-export="${i}">导出</button></div>`).join('') : '<p class="empty">还没有真实模型成功返回的问答。</p>'}</div><div class="box"><h2>采音会话</h2>${meetings?.length ? meetings.map((m,i) => `<div class="entry"><div class="grow"><b>${escapeText(m.title || '未命名会话')}</b><p>${escapeText(m.date)} · ${escapeText(m.duration)}</p></div><button data-meeting="${i}">导出转写</button><button data-review="${i}">生成复盘</button></div>`).join('') : '<p class="empty">暂无真实会话记录。</p>'}</div>`;
   const answerText = a => `# ${a.question}\n\n${a.date}\n\n## 快答\n${a.answers.quick || ''}\n\n## 展开\n${a.answers.deep || ''}`;
-  document.querySelectorAll('[data-answer]').forEach(b => b.onclick = action(async () => { const a = answers[+b.dataset.answer]; await selectView(a.task); state.quick = a.answers.quick || ''; state.deep = a.answers.deep || ''; $('#quick').textContent = state.quick; $('#deep').textContent = state.deep; $('#question-title').textContent = a.question; state.lastQuestion = a.question; $('#dual').checked = !!a.answers.deep; $('#dual').onchange(); renderSources(a.sources); }));
+  document.querySelectorAll('[data-answer]').forEach(b => b.onclick = action(async () => {
+    if (state.request || state.imageBusy) throw new Error('请先等待当前任务完成，再查看历史回答');
+    const a = answers[+b.dataset.answer];
+    await selectView(['interview','written','resume','review'].includes(a.task) ? a.task : 'interview');
+    state.images = []; state.ocrPaths = null; renderImages();
+    $('#question').value = a.question; $('#written-input-mode').value = 'text';
+    state.quick = a.answers.quick || ''; state.deep = a.answers.deep || ''; paintAnswers();
+    $('#question-title').textContent = a.question; state.lastQuestion = a.question;
+    $('#quick-time').textContent = ''; $('#deep-time').textContent = '';
+    $('#dual').checked = !!a.answers.deep; $('#dual').onchange(); renderSources(a.sources);
+    if (a.task === 'written') message('已恢复历史题目文字。截图题请重新附加原图，并选择图片与文字模式后再分析。');
+  }));
   document.querySelectorAll('[data-answer-export]').forEach(b => b.onclick = action(() => call('export', { text: answerText(answers[+b.dataset.answerExport]), filename: 'interview-answer.md' })));
   async function meetingText(index) { const m = await native.getMeetingDetails(meetings[index].id); return `# ${m.title}\n\n` + (m.transcript || []).map(t => `${t.speaker}：${t.text}`).join('\n\n'); }
   document.querySelectorAll('[data-meeting]').forEach(b => b.onclick = action(async () => call('export', { text: await meetingText(+b.dataset.meeting), filename: 'meeting-transcript.md' })));
@@ -413,7 +440,7 @@ studio.onEvent(data => {
   if (data.kind === 'token') { state[data.column] += data.text; scheduleAnswerPaint(); }
   if (data.kind === 'first') $('#' + data.column + '-time').textContent = `首字 ${data.ms} ms`;
   if (data.kind === 'error') { state.lastError = data.message; message(data.message); if (data.column && !state[data.column]) $('#' + data.column).textContent = '生成未成功，请检查错误提示后重试。'; }
-  if (data.kind === 'done') { paintAnswers(); state.request = null; $('#ask').disabled = false; if (state.extracting && data.ok) { $('#question').value = state.quick; $('#question').focus(); message('题目已识别到输入框，请校对后点击「分析解题」。'); } else if (data.ok) message(`生成完成 · 总耗时 ${data.ms} ms`); else if (data.partial) message('已保留收到的部分内容。' + (state.lastError || '')); state.extracting = false; }
+  if (data.kind === 'done') { paintAnswers(); state.request = null; paintImageControls(); if (state.extracting && data.ok) { $('#question').value = state.quick; $('#question').focus(); message('题目已识别到输入框，请校对后点击「分析解题」。'); } else if (data.ok) message(`生成完成 · 总耗时 ${data.ms} ms`); else if (data.partial) message('已保留收到的部分内容。' + (state.lastError || '')); state.extracting = false; }
 });
 native.onNativeAudioTranscript(data => {
   if (!data.final && data.speaker === 'them') state.themPartial = data.text;
@@ -448,15 +475,24 @@ $('#pause-transcription').onclick = action(async () => { await call('transcripti
 $('#finish-turn').onclick = action(async () => { await call('transcription-finish'); await refresh(); message('已提交确认的文字，正在识别的内容会继续接收。'); });
 $('#transcription-mode').onchange = action(async () => { const value = $('#transcription-mode').value; await call('transcription-settings', { mode: value === 'manual' ? 'manual' : 'auto', silenceMs: value === 'manual' ? 30000 : Number(value) }); await refresh(); });
 async function importQuestionImage(source) {
-  if (state.images.length >= 4) throw new Error('一次最多附加 4 张图片');
-  const image = await call('image-import', { source });
-  if (!image.cancelled) { state.images.push(image); renderImages(); message('图片已附加。点击识别题目，或直接分析解题；届时图片会发送给你选择的模型。'); }
+  return withImageOperation(async () => {
+    if (state.images.length >= 4) throw new Error('一次最多附加 4 张图片');
+    const image = await call('image-import', { source });
+    if (!image.cancelled) { state.images.push(image); state.ocrPaths = null; renderImages(); message('图片已附加。点击识别题目，或直接分析解题；届时图片会发送给你选择的模型。'); }
+  });
 }
 $('#import-question-image').onclick = action(() => importQuestionImage('file'));
 $('#paste-question-image').onclick = action(() => importQuestionImage('clipboard'));
-$('#recognize-question').onclick = action(async () => { if (!state.images.length) throw new Error('请先截图、导入或粘贴题目图片'); const button = $('#recognize-question'); button.disabled = true;
-  try { message('正在本机识别题目，不发送图片…'); const result = await call('image-recognize', { paths: state.images.map(i => i.path) }); $('#question').value = result.text; state.ocrPaths = state.images.map(i => i.path); $('#written-input-mode').value = 'text'; $('#question').focus(); message('本机识别完成，请校对题目、公式和代码缩进，再点击分析解题。'); }
-  finally { button.disabled = false; } });
+$('#recognize-question').onclick = action(() => withImageOperation(async () => {
+  if (!state.images.length) throw new Error('请先截图、导入或粘贴题目图片');
+  const questionBefore = $('#question').value;
+  message('正在本机识别题目，不发送图片…');
+  const result = await call('image-recognize', { paths: state.images.map(i => i.path) });
+  if ($('#question').value !== questionBefore) { message('识别已完成，题目已手动修改，未覆盖输入。如需替换，请再次识别。'); return; }
+  $('#question').value = result.text; state.ocrPaths = state.images.map(i => i.path);
+  $('#written-input-mode').value = 'text'; $('#question').focus();
+  message('本机识别完成，请校对题目、公式和代码缩进，再点击分析解题。');
+}));
 $('#stop').onclick = action(async () => { checked(await native.endMeeting()); await refresh(); });
 $('#overlay').onclick = action(async () => { checked(await native.setWindowMode('overlay')); });
 $('#prepare').onclick = action(() => selectView('preparation'));

@@ -55,7 +55,7 @@ if (runtimeCheck) app.whenReady().then(async () => {
     const win = AppState.getInstance().windowHelper.getLauncherWindow();
     if (!win || win.webContents.isLoading()) continue;
     const result = await win.webContents.executeJavaScript(`(async () => { const s = await window.studio.invoke('status'); return { version: s.appVersion, timeout: s.transcription?.silenceMs, compatibility: s.meetingCompatibility, notice: document.querySelector('#notice').textContent }; })()`);
-    assert.equal(result.version, '0.8.6'); assert.equal(result.timeout, 30000); assert.equal(result.compatibility, true); assert.equal(result.notice, '');
+    assert.equal(result.version, '0.8.7'); assert.equal(result.timeout, 30000); assert.equal(result.compatibility, true); assert.equal(result.notice, '');
     const all = require('electron').BrowserWindow.getAllWindows();
     for (let attempt = 0; attempt < 50 && all.some(w => w.webContents.isLoading()); attempt++) await new Promise(resolve => setTimeout(resolve, 100));
     const auxiliary = all.filter(w => /window=(cropper|settings)/.test(w.webContents.getURL()));

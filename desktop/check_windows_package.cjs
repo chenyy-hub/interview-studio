@@ -27,7 +27,7 @@ const native = spawnSync(binary, [path.join(__dirname, 'runtime-smoke.cjs'), arc
 });
 assert.equal(native.status, 0, (native.stdout || '') + (native.stderr || '') + (native.error?.message || ''));
 const report = { platform: process.platform, arch: process.arch, nativeBrowserStartup: 'passed', packagedDependencies: 'passed', windowControls: 'passed: real native launcher maximize/restore, minimize and close', floatingRenderer: 'passed: actual preload/CSP, uniform group opacity, unchanged hover/focus, explicit editing and font with synthetic state',
-  workbenchFeatures: 'passed: keyboard controls, task drafts and explicit image mode', nativeHandlers: 'passed: real IPC and hidden-window recovery',
+  workbenchFeatures: 'passed: keyboard controls, task drafts, delayed OCR guards, manual edits, capture cancellation and history recovery', nativeHandlers: 'passed: real IPC and hidden-window recovery',
   localOCR: /STUDIO_LOCAL_OCR=passed/.test(featureResult.stdout) ? 'passed' : 'unavailable on build host; synthetic UI fixture only',
   audioCapture: 'not tested with actual devices', meetingSharingPrivacy: 'not tested in Feishu or Tencent Meeting',
   stdout: native.stdout, at: new Date().toISOString() };

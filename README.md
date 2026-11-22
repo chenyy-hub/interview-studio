@@ -1,7 +1,14 @@
 # Interview Studio
 
 Chinese desktop interview/meeting assistant, based on the pinned Pika 3.4.0
-runtime, with the editable extension under `desktop/`. Version: **0.8.6**.
+runtime, with the editable extension under `desktop/`. Version: **0.8.7**.
+
+## 0.8.7 image workflow fixes
+
+- Pending image imports, capture and OCR block task changes and duplicate image actions until completion.
+- OCR preserves text edited while recognition was running. Failures release controls so another attempt can proceed.
+- Opening a saved answer restores its question and clears unrelated attachments. Written screenshot questions explicitly require reattaching the original image.
+- Packaged renderer checks cover delayed OCR, edit preservation, capture cancellation and history recovery, alongside the existing keyboard and local OCR checks.
 
 ## 0.8.6 flow fixes
 
