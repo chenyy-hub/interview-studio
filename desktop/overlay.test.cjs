@@ -14,7 +14,7 @@ test('floating UI preserves group alpha, requires explicit editing and still sha
   const context={Math,Date,document:{querySelector:element,documentElement:{dataset:{},style:{setProperty:(name,value)=>variables.set(name,value)}}},addEventListener(){},requestAnimationFrame:callback=>callback(),electronAPI:{}};
   context.window=context;context.studio={onEvent:callback=>{listener=callback;},invoke:async(name,data)=>{
     calls.push({name,data});if(name==='status')return status;
-    if(name==='capture')return canceled?{canceled:true}:{path:'/synthetic/area.png',preview:'data:image/png;base64,c3ludGhldGlj'};
+    if(name==='capture')return canceled?{cancelled:true}:{path:'/synthetic/area.png',preview:'data:image/png;base64,c3ludGhldGlj'};
     if(name==='appearance'){status.appearance=data;listener({kind:'appearance',value:data});}
     return {success:true};
   }};

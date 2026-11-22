@@ -39,15 +39,15 @@ Chromium launch lock was actually removed before relaunch.
 
 ## API credentials and password prompts
 
-The default is **memory-only credentials**: launching the app and opening settings
-do not access the login keychain. API keys entered in the provider page are kept
-for this process and discarded on exit. Existing credential files are untouched.
-The Chinese status strip makes this behavior explicit.
+The Chinese extension saves its configuration in this OS account's private app-data directory. It does not ship credentials or transcripts in release archives. This account-local storage is not an OS-keychain security boundary; another process with equivalent account access can read the same files. Legacy OS-encrypted import remains an explicit action.
 
-Under 语音与术语, users may explicitly enable encrypted persistence/load saved
-credentials. Only that action accesses Electron's OS secure storage and may show
-a macOS login-keychain prompt. Refusing keeps memory-only mode usable. Encrypted
-saving retains upstream atomic write/verification; plaintext fallback is blocked.
+## Current flow and build adapter
+
+`runtime_payload.py` packages the extension and applies `runtime-patches.json` against the exact pinned upstream compiled code. Every source anchor must match once. The patches cover system/user audio routing, 30-second turn assembly, speech drain on stop, optional-microphone reconfiguration, recovery status and Windows file URLs. Package metadata points to this fork.
+
+The written workspace uses independent drafts and an explicit image/text mode. Native Windows OCR scales to the engine's supported dimensions and preserves editable lines; OCR cannot verify diagrams, code indentation or mathematical layout. Repeat-region screenshot capture never moves the OS pointer and does not reopen the cropper. It does not guarantee that a meeting receiver cannot see the system pointer.
+
+`check_windows_package.cjs` tests the actual packaged workbench, preload, CSP, keyboard flows, hidden-window restoration and native dependencies. A CI host without an OCR language pack may use an explicitly labeled OCR fixture. Set `STUDIO_REQUIRE_LOCAL_OCR=1` to require actual local OCR, as used for the Windows validation on the development machine.
 
 ## Connected behavior
 

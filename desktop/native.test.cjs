@@ -17,6 +17,7 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const window = { isDestroyed: () => false, show() {}, focus() {}, loadURL: async () => {}, webContents: { getURL: () => pathToFileURL(path.join(directory, 'desktop/index.html')).href, send: (...args) => sent.push(args) } };
   const electron = { app: { getAppPath: () => directory, getPath: () => directory, on: () => {} }, BrowserWindow: { getAllWindows: () => [window] },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn) }, dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [source] }) },
+    screen: { getAllDisplays: () => [{ id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }] },
     systemPreferences: { getMediaAccessStatus: () => 'not-determined' }, Menu: { buildFromTemplate: list => list, setApplicationMenu: () => {} } };
   let modelReady = false;
   const cm = { credentials: {}, getAiResponseLanguage: () => 'English', getSttProvider: () => 'deepgram', getDeepgramApiKey: () => speechReady ? 'synthetic-key' : '', resolveModelUse: () => modelReady ? { model: 'fixture-model', connection: { name: 'Fixture', apiKey: 'not-a-real-key' } } : { error: 'Choose a model' } };
@@ -30,13 +31,18 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   const originalLoad = Module._load;
   Module._load = function(name, parent, isMain) {
     if (name === 'electron') return electron;
+    if (name.replaceAll('\\','/').endsWith('/lib/audio-pipeline.js')) return { reconfigureSttProvider: async () => {} };
+    if (name.replaceAll('\\','/').endsWith('/lib/transcript-assembler.js')) return { flushBufferedTranscriptTurn: async () => {}, scheduleBufferedTranscriptFlush() {} };
+    if (name.replaceAll('\\','/').endsWith('/services/KeybindManager.js')) return { KeybindManager: { getInstance: () => ({ shouldRegister: () => true, registerGlobalShortcuts() {}, studioRegisteredAccelerators: new Set() }) } };
+    if (name.replaceAll('\\','/').endsWith('/lib/screenshot-capture.js')) return { takeScreenshot: state => state.takeScreenshot(), takeSelectiveScreenshot: async state => { await state.cropperWindowHelper.showCropper(); return state.takeSelectiveScreenshot(); } };
+
     if (name.replaceAll('\\', '/').endsWith('/services/CredentialsManager.js')) return { CredentialsManager: { getInstance: () => cm } };
     if (name.replaceAll('\\', '/').endsWith('/services/connectionSecrets.js')) return { redactConnectionError: error => error };
     return originalLoad.apply(this, arguments);
   };
   t.after(() => { Module._load = originalLoad; });
   const { install } = require('./native.cjs');
-  install({ windowHelper: { getLauncherWindow: () => window }, getCurrentMeetingId: () => meetingId, getNativeAudioStatus: () => ({}), startMeeting: async metadata => starts.push(metadata),
+  install({ cropperWindowHelper: { showCropper: async () => ({x:0,y:0,width:100,height:100}) }, windowHelper: { getLauncherWindow: () => window }, getCurrentMeetingId: () => meetingId, getNativeAudioStatus: () => ({}), startMeeting: async metadata => starts.push(metadata),
     processingHelper: { getLLMHelper: () => llm }, getIntelligenceManager: () => ({ getFormattedContext: () => 'Synthetic transcript' }),
     takeScreenshot: async () => { captured++;return '/synthetic/screen.png'; }, takeSelectiveScreenshot: async () => { captured++;return '/synthetic/area.png'; },
     getImagePreview: async () => 'data:image/png;base64,fixture' });
@@ -104,6 +110,9 @@ test('desktop bridge validates senders, persists real documents and uses Pika sc
   assert.equal(sourceInfo.complete, true);
   assert.match((await invoke('document-text', sourceInfo)).text, /Invented local document/);
   assert.equal((await invoke('document-text', { ...sourceInfo, hash: 'wrong-version' })).success, false);
+  await invoke('ask', { id: 'isolated-written', task: 'written', question: 'Synthetic practice question' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(!contexts.at(-1).includes('Invented profile')); assert.ok(!contexts.at(-1).includes('Invented local document')); assert.ok(!contexts.at(-1).includes('Synthetic transcript'));
   failDeep = true;
   await invoke('ask', { id: 'partial-answer', task: 'interview', question: 'Synthetic dual question', dual: true });
   await new Promise(resolve => setImmediate(resolve));

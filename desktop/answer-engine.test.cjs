@@ -27,7 +27,8 @@ test('stop prevents subsequent tokens and never reports a successful answer', as
   const controller = new AbortController(); const events = [];
   const result = await runAnswers({ request: { id: 'cancelled', task: 'written', question: 'test', dual: false }, context: '', signal: controller.signal,
     stream: async function* () { yield 'first'; controller.abort(); yield 'must not appear'; }, send: e => events.push(e) });
-  assert.deepEqual(result, {});
+  assert.deepEqual(result, { quick: 'first' });
+  assert.equal(events.at(-1).partial, true);
   assert.equal(events.filter(e => e.kind === 'token').length, 1);
   assert.equal(events.at(-1).ok, false);
 });
@@ -63,4 +64,11 @@ test('saved answer language and programming preferences reach both actual provid
     stream: async function* (_q,_i,_c,system) { prompts.push(system); yield 'synthetic'; } });
   assert.equal(prompts.length,2);
   for (const prompt of prompts) { assert.match(prompt,/Answer in English/); assert.match(prompt,/C\+\+/); assert.ok(!prompt.includes('用中文作答')); }
+});
+
+test('a provider failure after a token retains its text as an incomplete result', async () => {
+  const events=[];
+  const result=await runAnswers({request:{id:'partial-token',task:'written',question:'fixture',programmingLanguage:'C'},preparation:{programmingLanguage:'Python'},context:'',signal:new AbortController().signal,send:e=>events.push(e),
+    stream:async function* (_q,_i,_c,system) {assert.match(system,/优先使用 C。/);yield '可保留的部分';throw new Error('network interrupted');}});
+  assert.equal(result.quick,'可保留的部分');assert.equal(events.at(-1).partial,true);assert.equal(events.at(-1).ok,false);
 });

@@ -44,7 +44,10 @@ function paint() {
   $('#question-label').textContent = state.lastQuestion;
   $('#answer-timing').textContent = state.first[state.tab] != null ? `首字 ${state.first[state.tab]} ms` : '';
   $('#quick-answer').disabled = !!state.request; $('#send-question').disabled = !!state.request;
-  $('#session-status').textContent = state.request ? '生成中' : state.status?.sessionActive ? '正在听题' : '未采音';
+  $('#pause-transcription').disabled = !state.status?.sessionActive || !!state.status?.transcription?.busy;
+  $('#finish-turn').disabled = !state.status?.sessionActive || !!state.status?.transcription?.busy;
+  $('#pause-transcription').textContent = state.status?.transcription?.paused ? '继续转写' : '暂停转写';
+  $('#session-status').textContent = state.status?.transcription?.paused ? '转写已暂停' : state.request ? '生成中' : state.status?.sessionActive ? '正在听题' : '未采音';
 }
 let scheduled = false;
 function schedulePaint() { if(scheduled) return; scheduled=true; (window.requestAnimationFrame || (fn=>fn()))(()=>{scheduled=false;paint();}); }
@@ -63,7 +66,7 @@ async function refresh() {
 }
 async function ask(question) {
   if(state.request) throw new Error('正在生成，可以先点停止。');
-  const text=question || $('#question-input').value.trim() || latest();
+  const text=question || $('#question-input').value.trim() || $('#partial-transcript').textContent.replace(/^(我|对方)：/, '').trim() || latest();
   if(!text) throw new Error('还没有题目。输入问题，或开始面试获取转写。');
   const status=await call('status'); state.status=status;
   if(status.generation?.running) { restoreGeneration(status.generation); throw new Error('已有回答正在生成。'); }
@@ -74,13 +77,20 @@ async function ask(question) {
   $('#question-input').value='';
 }
 function images() { $('#attached-images').innerHTML=state.images.map((item,i)=>`<span><img src="${escapeText(item.preview)}" alt="截图附件"><button data-remove="${i}" aria-label="移除截图">×</button></span>`).join(''); $('#attached-images').querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>{state.images.splice(+b.dataset.remove,1);images();}); }
-async function captureAndAsk() { if(state.request) throw new Error('请先停止当前生成。'); const captured=await call('capture',{area:true}); if(captured.canceled) return; state.images=[captured];images();await ask($('#question-input').value.trim() || '请识别截图中的题目，直接给出答案与必要解释。'); }
+async function captureAndAsk(repeat = false) { if(state.request) throw new Error('请先停止当前生成。'); const captured=await call('capture',{area:true,repeat}); if(captured.cancelled) return; state.images=[captured];images();await ask($('#question-input').value.trim() || '请识别截图中的题目，直接给出答案与必要解释。'); }
+async function repeatCapture() { if(state.request) throw new Error('请先停止当前生成。'); const captured=await call('capture',{area:true,repeat:true}); if(captured.cancelled) return; state.images=[captured];images();notice('选区截图已附加，点击快答才发送给模型。'); }
+$('#pause-transcription').onclick=action(async()=>{await call('transcription-pause',{paused:!state.status?.transcription?.paused});await refresh();});
+$('#finish-turn').onclick=action(async()=>{await call('transcription-finish');await refresh();notice('本段已提交，继续监听。');});
 const shortcuts = {
-  quick:()=>ask(), retry:()=>{ if(!state.lastQuestion) throw new Error('还没有可重新生成的问题。'); return ask(state.lastQuestion); }, capture:captureAndAsk,
+  quick:()=>ask(), retry:()=>{ if(!state.lastQuestion) throw new Error('还没有可重新生成的问题。'); return ask(state.lastQuestion); }, capture:()=>captureAndAsk(), 'capture-repeat':repeatCapture,
+  pause:()=>$('#pause-transcription').onclick(), finish:()=>$('#finish-turn').onclick(),
   'scroll-up':()=>$('#answer-scroll').scrollBy({top:-180,behavior:'auto'}), 'scroll-down':()=>$('#answer-scroll').scrollBy({top:180,behavior:'auto'}),
   'quick-tab':()=>{state.tab='quick';paint();}, 'deep-tab':()=>{state.tab='deep';paint();},
 };
 bridge.onEvent(data=>{
+  if(data.kind==='transcription-state') {if(state.status) state.status.transcription=data.value;paint();return;}
+  if (data.kind === 'speech-recovered') { notice('语音连接已恢复'); void refresh().catch(() => {}); return; }
+  if(data.kind==='speech-error') {notice(data.message);return;}
   if(data.kind==='appearance') { if(state.status) state.status.appearance=data.value;applyAppearance(data.value);return; }
   if(data.kind==='floating-state') {renderFloating(data.value);return;}
   if(data.kind==='shortcut' && shortcuts[data.action]) {void action(shortcuts[data.action])();return;}
@@ -98,14 +108,14 @@ native.onMeetingStateChanged?.(()=>{void refresh().catch(error=>notice(error.mes
 native.onOverlayMousePassthroughChanged?.(()=>{void refresh().catch(error=>notice(error.message));});
 native.onGlobalShortcut?.(data=>{if(data?.action==='reply') void action(async()=>{const s=await call('status');if(s.floating?.mode==='overlay') await ask();})();if(data?.action==='resetCancel') void action(()=>call('cancel',{id:state.request}))();});
 native.onScreenshotAttached?.(item=>{state.images=[item];images();notice('截图已附加，点击 AI 快答发送。');});
-$('#quick-answer').onclick=action(()=>ask());$('#capture-answer').onclick=action(captureAndAsk);$('#retry-answer').onclick=action(shortcuts.retry);
+$('#quick-answer').onclick=action(()=>ask());$('#capture-answer').onclick=action(()=>captureAndAsk());$('#retry-answer').onclick=action(shortcuts.retry);$('#repeat-capture').onclick=action(repeatCapture);
 $('#stop-answer').onclick=action(()=>call('cancel',{id:state.request}));
 $('#quick-tab').onclick=shortcuts['quick-tab'];$('#deep-tab').onclick=shortcuts['deep-tab'];
 $('#show-transcript').onclick=()=>{$('#transcript-panel').hidden=!$('#transcript-panel').hidden;$('#show-transcript').setAttribute('aria-expanded',String(!$('#transcript-panel').hidden));};
 $('#use-transcript').onclick=()=>{$('#question-input').value=latest();$('#question-input').focus();};
 $('#copy-answer').onclick=action(async()=>{if(!state[state.tab]) throw new Error('还没有回答。');await navigator.clipboard.writeText(state[state.tab]);notice('已复制。');});
 $('#question-form').onsubmit=event=>{event.preventDefault();void action(()=>ask())();};
-$('#question-input').addEventListener('keydown',event=>{if(!event.isComposing && event.keyCode!==229 && event.key==='Enter' && !event.shiftKey){event.preventDefault();void action(()=>ask())();}});
+$('#question-input').addEventListener('keydown',event=>{if(!event.isComposing && event.keyCode!==229 && event.key==='Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey){event.preventDefault();void action(()=>ask())();}});
 $('#panel-settings').onclick=action(async()=>{if(state.status?.floating?.collapsed) await call('floating',{action:'collapse',enabled:false});$('#settings-panel').hidden=!$('#settings-panel').hidden;});$('#close-settings').onclick=()=>{$('#settings-panel').hidden=true;};
 $('#readable-editing').onclick=()=>setEditing(!state.editing);
 $('#close-overlay').onclick=action(()=>call('floating',{action:'hide'}));$('#open-main').onclick=action(()=>call('floating',{action:'main'}));

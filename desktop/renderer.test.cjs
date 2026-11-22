@@ -143,7 +143,7 @@ test('saved local status is visible, source confirmation precedes capture, and s
   element('#session-mic').checked = true;
   await element('#source-start').onclick();
   assert.equal(closed, 1);
-  assert.equal(calls.find(c => c.name === 'audio-preferences').data.captureMicrophone, true);
+  assert.equal(calls.find(c => c.name === 'start').data.captureMicrophone, true);
   assert.equal(calls.filter(c => c.name === 'start').length, 1);
   rejectStart = true;
   await element('#start').onclick(); await element('#source-start').onclick();
@@ -173,4 +173,27 @@ test('interview preparation saves locally and returns to the workbench without a
   assert.equal(element('#work').hidden,false); assert.equal(element('#other').hidden,true);
   assert.match(element('#preparation-summary').textContent,/Synthetic/); assert.match(element('#preparation-summary').textContent,/英文回答/);
   assert.equal(status.preparation.programmingLanguage,'C++'); assert.ok(calls.every(name => ['status','preparation'].includes(name)));
+});
+
+test('written OCR is an explicit text mode; image mode retains diagrams and task drafts do not leak', async () => {
+  const elements=new Map(), calls=[];let listener;
+  const element=selector=>{if(!elements.has(selector))elements.set(selector,{value:'',checked:false,textContent:'',innerHTML:'',classList:{toggle(){}},querySelectorAll:()=>[],addEventListener(){},focus(){}});return elements.get(selector);};
+  const nav=['interview','written'].map(view=>({dataset:{view},classList:{toggle(){}}}));
+  const status={sessionActive:false,model:{model:'synthetic'},speech:{configured:true},permissions:{},transcripts:[],preparation:{programmingLanguage:'Python'}};
+  const context={document:{querySelector:element,querySelectorAll:s=>s==='[data-view]'?nav:[]},electronAPI:{onNativeAudioTranscript(){},onMeetingStateChanged(){},onSessionReset(){},onGlobalShortcut(){}},addEventListener(){},requestAnimationFrame:fn=>fn()};
+  context.window=context;context.studio={onEvent:fn=>{listener=fn;},invoke:async(name,data)=>{calls.push({name,data});if(name==='status')return status;if(name==='image-import')return {path:'/synthetic/diagram.png',preview:'data:image/png;base64,fixture'};if(name==='image-recognize')return {text:'已校对的练习题'};return {success:true};}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'renderer.js'),'utf8'),context);await new Promise(resolve=>setImmediate(resolve));
+  element('#question').value='面试草稿';await nav[1].onclick();assert.equal(element('#question').value,'');
+  await element('#import-question-image').onclick();await element('#recognize-question').onclick();
+  assert.equal(element('#written-input-mode').value,'text');element('#written-language').value='C++';
+  await element('#ask').onclick();let request=calls.filter(c=>c.name==='ask').at(-1).data;
+  assert.equal(request.task,'written');assert.equal(request.programmingLanguage,'C++');assert.equal(request.images.length,0);
+  assert.ok(!calls.some(c=>c.name==='preparation'),'Written code choice must not mutate interview preparation');
+  await nav[0].onclick();assert.match(element('#notice').textContent,/停止或等待/);
+  listener({kind:'done',id:request.id,ok:true});await nav[0].onclick();
+  assert.equal(element('#question').value,'面试草稿');assert.equal(element('#attachments').innerHTML,'');
+  await nav[1].onclick();assert.equal(element('#question').value,'已校对的练习题');
+  element('#written-input-mode').value='images';await element('#ask').onclick();request=calls.filter(c=>c.name==='ask').at(-1).data;
+  assert.deepEqual([...request.images],['/synthetic/diagram.png']);listener({kind:'token',id:request.id,column:'quick',text:'可播报的合成回答'});listener({kind:'done',id:request.id,ok:true});
+  status.sessionActive=true;status.transcription={paused:false};await element('#speak').onclick();assert.match(element('#notice').textContent,/请先暂停转写再播报/);
 });

@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PRODUCT = "InterviewStudio"
-VERSION = "0.8.1"
+VERSION = "0.8.6"
 
 def replace_once(text, old, new):
     if text.count(old) != 1:
@@ -14,8 +14,11 @@ def runtime_payload(read):
     if package['version'] != '3.4.0':
         raise RuntimeError('This adapter targets the Pika 3.4.0 release only')
     package.update(name='interview-studio', version=VERSION, main='desktop/bootstrap.cjs', productName=PRODUCT)
+    package.update(homepage='https://github.com/chenyy-hub/interview-studio#readme',
+                   repository={'type': 'git', 'url': 'git+https://github.com/chenyy-hub/interview-studio.git'},
+                   bugs={'url': 'https://github.com/chenyy-hub/interview-studio/issues'})
     additions = {'package.json': json.dumps(package, ensure_ascii=False, indent=2).encode()}
-    for filename in ['bootstrap.cjs','credential-session.cjs','local-vault.cjs','service-readiness.cjs','audio-devices.cjs','native.cjs','answer-engine.cjs','context-index.cjs','preparation.cjs','fast-stream.cjs','privacy-controller.cjs','appearance.cjs','floating.cjs','window-smoke.cjs','index.html','renderer.js','studio.css','overlay.html','overlay.js','overlay.css','remote.html']:
+    for filename in ['bootstrap.cjs','credential-session.cjs','local-vault.cjs','service-readiness.cjs','audio-devices.cjs','native.cjs','answer-engine.cjs','context-index.cjs','preparation.cjs','fast-stream.cjs','privacy-controller.cjs','appearance.cjs','floating.cjs','window-smoke.cjs','index.html','renderer.js','studio.css','overlay.html','overlay.js','overlay.css','remote.html','doubao-asr.cjs','transcription-control.cjs','capture-regions.cjs','keyboard.js','local-ocr.cjs','written-images.cjs','windows-ocr.ps1','upgrade-smoke.cjs','ocr-fixture.png']:
         additions['desktop/' + filename] = (ROOT / 'desktop' / filename).read_bytes()
     original_preload = read('dist-electron/electron/preload.js')
     additions['desktop/preload.cjs'] = (original_preload + '\n' + (ROOT / 'desktop/preload-extra.cjs').read_text()).encode()
@@ -93,4 +96,12 @@ def runtime_payload(read):
     additions['desktop/LICENSE'] = (ROOT / 'LICENSE').read_bytes()
     additions['desktop/UPSTREAM.txt'] = b'Pika 3.4.0, https://github.com/royisme/pikabaka, AGPL-3.0-only.\nInterview Studio local development extension.\n'
 
+    # Exact source anchors keep the binary-release and source-build adapters aligned.
+    # Any pinned upstream shape change must fail rather than silently skip a fix.
+    for patch in json.loads((ROOT / 'desktop/runtime-patches.json').read_text(encoding='utf-8')):
+        name = patch['file']
+        text = additions[name].decode('utf-8') if name in additions else read(name)
+        for change in patch['changes']:
+            text = replace_once(text, change['before'], change['after'])
+        additions[name] = text.encode('utf-8')
     return additions

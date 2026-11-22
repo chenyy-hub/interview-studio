@@ -1,9 +1,22 @@
 # Interview Studio
 
 Chinese desktop interview/meeting assistant, based on the pinned Pika 3.4.0
-runtime, with the editable extension under `desktop/`. Version: **0.8.1**.
+runtime, with the editable extension under `desktop/`. Version: **0.8.6**.
 
-## This update
+## 0.8.6 flow fixes
+
+- Default system audio, optional self microphone, 30-second turn wait and explicit pause/resume.
+- Interview/written drafts and attachments are separate. Written code-language choices do not change interview preparation.
+- Local OCR produces editable text with an explicit text/image send mode; diagrams can retain their original images.
+- Reuse a selected screenshot region without moving the cursor through another cropper. Display/DPI changes require reselection.
+- Foreground keyboard controls plus opt-in global pause/finish/repeat capture controls. Compatibility mode releases owned global controls.
+- Pausing cannot stop a replacement meeting; reconnect status is visible; interrupted streamed answers remain marked incomplete.
+- Speech playback requires pausing transcription first to avoid capturing the app's own answer.
+- The build adapter now includes all previously local 0.8.3–0.8.5 changes and exact pinned source anchors.
+
+See [the code and reference review](GENIE_FEATURES.md) for evidence and remaining real-meeting validation.
+
+## Earlier features
 
 - Floating text and controls now share one saved overall opacity. Hovering or
   focusing the composer no longer reveals bright top/bottom bars. The zero
@@ -66,11 +79,11 @@ tests, packaging or a successful startup.
 
 ## Windows
 
-Download the individual Setup executable from the private repository's
+Download the individual Setup executable from the repository's
 [latest installer](https://github.com/chenyy-hub/interview-studio/releases/latest/download/InterviewStudio-Windows-Setup.exe).
 The portable executable is an alternative; users do not need both. Release
 assets retain the original verified build checksums and do not expire with
-the Actions artifact. Repository access is required.
+the Actions artifact. Local development ZIP releases are also listed on Releases.
 
 Run the **Windows Desktop Build** workflow. It checks out the pinned upstream,
 builds its renderer/main/native addon, applies this extension, and creates a

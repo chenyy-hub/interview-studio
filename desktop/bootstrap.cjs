@@ -5,9 +5,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const launchCheck = process.argv.includes('--studio-launch-check');
 const windowCheck = process.argv.includes('--studio-window-check');
+const upgradeCheck = process.argv.includes('--studio-upgrade-check');
+const runtimeCheck = process.argv.includes('--studio-runtime-check');
 // Isolate this fork's data before any upstream singleton is constructed.
 app.setName('Interview Studio');
-const studioData = launchCheck || windowCheck ? fs.mkdtempSync(path.join(os.tmpdir(), 'studio-launch-check-')) : path.join(app.getPath('appData'), 'InterviewStudio');
+const studioData = launchCheck || windowCheck || upgradeCheck || runtimeCheck ? fs.mkdtempSync(path.join(os.tmpdir(), 'studio-launch-check-')) : path.join(app.getPath('appData'), 'InterviewStudio');
 fs.mkdirSync(studioData, { recursive: true });
 app.setPath('userData', studioData);
 // Keep startup diagnostics separate from prompts, transcripts and credentials.
@@ -22,7 +24,9 @@ app.on('web-contents-created', (_event, contents) => {
     if (/^(Uncaught (TypeError|ReferenceError|SyntaxError)|Unable to load preload|Error: module not found)/.test(event.message)) startupLog('renderer-startup', event.message);
   });
 });
-if (windowCheck) {
+if (upgradeCheck) {
+  app.whenReady().then(() => require('./upgrade-smoke.cjs').run()).then(() => app.exit(0)).catch(error => { console.error(error); app.exit(1); });
+} else if (windowCheck) {
   app.whenReady().then(() => require('./window-smoke.cjs').run()).then(() => app.exit(0)).catch(error => {
     console.error('[Studio] Packaged window check failed:', error); app.exit(1);
   });
@@ -44,4 +48,24 @@ app.whenReady().then(() => require('./native.cjs').install(AppState.getInstance(
   startupLog('native-install', error);
   console.error('[Studio] Desktop service initialization failed:', error);
 });
+if (runtimeCheck) app.whenReady().then(async () => {
+  const assert = require('node:assert/strict');
+  for (let i = 0; i < 80; i++) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const win = AppState.getInstance().windowHelper.getLauncherWindow();
+    if (!win || win.webContents.isLoading()) continue;
+    const result = await win.webContents.executeJavaScript(`(async () => { const s = await window.studio.invoke('status'); return { version: s.appVersion, timeout: s.transcription?.silenceMs, compatibility: s.meetingCompatibility, notice: document.querySelector('#notice').textContent }; })()`);
+    assert.equal(result.version, '0.8.6'); assert.equal(result.timeout, 30000); assert.equal(result.compatibility, true); assert.equal(result.notice, '');
+    const all = require('electron').BrowserWindow.getAllWindows();
+    for (let attempt = 0; attempt < 50 && all.some(w => w.webContents.isLoading()); attempt++) await new Promise(resolve => setTimeout(resolve, 100));
+    const auxiliary = all.filter(w => /window=(cropper|settings)/.test(w.webContents.getURL()));
+    assert.ok(auxiliary.length >= 2, 'Cropper and settings windows must load');
+    for (const w of auxiliary) assert.equal(await w.webContents.executeJavaScript('document.readyState'), 'complete');
+    win.hide();
+    app.emit('second-instance', {}, [], process.cwd());
+    assert.equal(win.isVisible(), true, 'Opening a second instance must restore a hidden window');
+    console.log('STUDIO_RUNTIME_CHECK_OK: actual native handlers, real workbench, isolated credentials, hidden-window restore, no capture or model request'); app.exit(0); return;
+  }
+  throw new Error('Real runtime did not become ready');
+}).catch(error => { console.error(error); app.exit(1); });
 }

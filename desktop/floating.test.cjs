@@ -44,3 +44,12 @@ test('direct upstream mode switches also reset click-through and update scrollin
   assert.equal(f.floating.status().passthrough,false);assert.equal(f.keys.has('CommandOrControl+Shift+Up'),false);
   f.appState.windowHelper.switchToOverlay();assert.equal(f.keys.has('CommandOrControl+Shift+Up'),true);
 });
+
+test('compatibility releases only owned shortcuts and background actions target the current workbench', () => {
+  const f=fixture();
+  f.keys.get('CommandOrControl+Shift+F8')(); assert.equal(f.messages.at(-1)[1].action,'pause');
+  f.keys.get('CommandOrControl+Shift+F7')(); assert.equal(f.messages.at(-1)[1].action,'finish');
+  f.keys.get('CommandOrControl+Shift+F11')(); assert.equal(f.messages.at(-1)[1].action,'capture-repeat');
+  f.keys.set('other-app-owned',()=>{});f.appState.studioMeetingCompatibility=true;f.floating.refreshShortcuts();
+  assert.deepEqual([...f.keys.keys()],['other-app-owned']);
+});

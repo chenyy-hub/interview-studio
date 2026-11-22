@@ -7,6 +7,7 @@ function createFloating({ app, appState, globalShortcut, onChange = () => {} }) 
   const definitions = [
     ['toggle','O','开启 / 退出悬浮'], ['passthrough','U','鼠标穿透 / 恢复'],
     ['quick','A','AI 快答'], ['retry','R','重新生成'], ['capture','V','截图并提问'],
+    ['pause','F8','暂停 / 继续转写'], ['finish','F7','提交本段'], ['capture-repeat','F11','重用选区截图'],
     ['scroll-up','Up','向上滚动'], ['scroll-down','Down','向下滚动'], ['quick-tab','Left','快答栏'], ['deep-tab','Right','解释栏'],
   ];
   const mode = () => helper.getCurrentWindowMode?.() || 'launcher';
@@ -28,7 +29,7 @@ function createFloating({ app, appState, globalShortcut, onChange = () => {} }) 
   const refreshShortcuts = () => {
     if (!globalShortcut?.register) return;
     for (const [id,key] of definitions) {
-      const accelerator = 'CommandOrControl+Shift+'+key, wanted = mode() === 'overlay' || !['scroll-up','scroll-down','quick-tab','deep-tab'].includes(id);
+      const accelerator = 'CommandOrControl+Shift+'+key, wanted = !appState.studioMeetingCompatibility && (mode() === 'overlay' || !['scroll-up','scroll-down','quick-tab','deep-tab'].includes(id));
       if (!wanted && registered.has(id)) { globalShortcut.unregister(accelerator); registered.delete(id); failed.delete(id); }
       if (!wanted || registered.has(id)) continue;
       try {
@@ -81,6 +82,6 @@ function createFloating({ app, appState, globalShortcut, onChange = () => {} }) 
   overlay()?.on?.('show',emit); overlay()?.on?.('hide',emit);
   refreshShortcuts();
   app.on('will-quit', () => { for (const accelerator of registered.values()) globalShortcut?.unregister(accelerator); registered.clear(); });
-  return { status, run };
+  return { status, run, refreshShortcuts };
 }
 module.exports = { createFloating };

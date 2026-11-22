@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, systemPreferences, Menu, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, systemPreferences, Menu, globalShortcut, shell, nativeImage, clipboard, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -8,7 +8,8 @@ const os = require('node:os');
 const { fileURLToPath, pathToFileURL } = require('node:url');
 const { execFile } = require('node:child_process');
 const { runAnswers, validateRequest, applyGlossary } = require('./answer-engine.cjs');
-const { speechReadiness, audioPreferences, capturePermissions } = require('./service-readiness.cjs');
+const { speechReadiness, audioPreferences, capturePermissions, captureBlocker } = require('./service-readiness.cjs');
+const { checkDoubaoConnection } = require('./doubao-asr.cjs');
 const { ContextIndex } = require('./context-index.cjs');
 const { streamOpenAI } = require('./fast-stream.cjs');
 const { createPrivacy } = require('./privacy-controller.cjs');
@@ -20,6 +21,7 @@ function install(appState) {
   const compiled = path.join(app.getAppPath(), 'dist-electron/electron');
   const { CredentialsManager } = require(path.join(compiled, 'services/CredentialsManager.js'));
   const { redactConnectionError } = require(path.join(compiled, 'services/connectionSecrets.js'));
+  const { reconfigureSttProvider } = require(path.join(compiled, 'lib/audio-pipeline.js'));
   const cm = CredentialsManager.getInstance();
   const storePath = path.join(app.getPath('userData'), 'studio-state.json');
   let store = { notes: '', glossary: '', autoAnswer: false, documents: [], answers: [] };
@@ -79,18 +81,54 @@ function install(appState) {
   });
   const readiness = () => {
     const use = cm.resolveModelUse('chat');
+    const permissions = capturePermissions(systemPreferences);
     return { model: 'connection' in use ? { model: use.model, provider: use.connection.name } : null,
       modelError: 'error' in use ? use.error : null, credentialStorage: cm.studioCredentialSession?.state() || { mode: 'memory' },
       performance: store.performance, privacy: { ...privacy.status(), selfTest: store.privacy.selfTest || null }, floating: floating.status(),
-      platform: process.platform, appVersion: app.getVersion?.() || '0.8.1', preparation: store.preparation, appearance: store.appearance,
-      speech: { ...speechReadiness(cm), language: cm.credentials?.sttLanguage || 'chinese' }, captureSettings: store.audio, needsConfiguration: needsConfiguration && !speechReadiness(cm).configured,
-      permissions: capturePermissions(systemPreferences),
+      platform: process.platform, appVersion: app.getVersion?.(), preparation: store.preparation, appearance: store.appearance,
+      speech: { ...speechReadiness(cm), language: cm.credentials?.sttLanguage || 'chinese', doubaoKeySaved: !!cm.credentials?.doubaoApiKey }, captureSettings: store.audio, needsConfiguration: needsConfiguration && !speechReadiness(cm).configured,
+      permissions, systemAudioBlocker: captureBlocker({ ...store.audio, captureMicrophone: false }, permissions),
+      captureRegion: regionCapture?.status() || { canRepeat: false },
+      transcription: transcription.status(), meetingCompatibility: appState.studioMeetingCompatibility,
+      captureMicrophoneActive: !!appState.getCurrentMeetingId() && appState.studioCaptureMicrophone === true,
       sessionActive: !!appState.getCurrentMeetingId(), preferences: { notes: store.notes, glossary: store.glossary, autoAnswer: store.autoAnswer },
       documents: store.documents.map(({ id, name, text }) => ({ id, name, characters: text.length })),
       metrics: metricRows, pairing: !!room, transcripts: [...transcripts.values()], generation: lastGeneration,
       sttProvider: cm.getSttProvider(), audio: appState.getNativeAudioStatus?.() || null };
   };
+  const assembler = require(path.join(compiled, 'lib/transcript-assembler.js'));
+  const { createTranscriptionControl } = require('./transcription-control.cjs');
+  const transcription = createTranscriptionControl({ appState, assembler, initial: store.transcription,
+    onChange: value => send({ kind: 'transcription-state', value }) });
+  handle('transcription-settings', data => {
+    store.transcription = transcription.configure(data); write();
+    for (const speaker of ['them','user']) if (appState.transcriptTurnBuffers?.[speaker]) assembler.scheduleBufferedTranscriptFlush(appState, speaker, store.transcription.silenceMs);
+    return { success: true };
+  });
+  handle('transcription-pause', async data => ({ success: true, ...await transcription.pause(data?.paused) }));
+  handle('transcription-finish', async () => { await transcription.finishTurn(); return { success: true }; });
+  handle('meeting-compatibility', data => {
+    if (typeof data?.enabled !== 'boolean') throw new Error('会议兼容设置无效');
+    store.meetingCompatibility = data.enabled; appState.studioMeetingCompatibility = data.enabled;
+    keybindManager.registerGlobalShortcuts(); floating.refreshShortcuts(); write();
+    return { success: true };
+  });
   handle('status', readiness);
+  handle('capture-permission', async name => {
+    if (process.platform !== 'darwin') throw new Error('请在系统设置中管理采音权限。');
+    const pane = name === 'screen' ? 'Privacy_ScreenCapture' : name === 'microphone' ? 'Privacy_Microphone' : null;
+    if (!pane) throw new Error('未知的采音权限。');
+    await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+    return { success: true };
+  });
+  let speechCheck;
+  handle('speech-test', async () => {
+    if (appState.getCurrentMeetingId()) throw new Error('请先结束采音，再测试语音连接。');
+    if (cm.getSttProvider() !== 'doubao' || !cm.credentials?.doubaoApiKey) throw new Error('请先选择豆包语音并保存 Key。');
+    speechCheck ||= checkDoubaoConnection(cm.credentials.doubaoApiKey).finally(() => { speechCheck = null; });
+    await speechCheck;
+    return { success: true };
+  });
   const saveAppearance = async data => {
     const next = appearance({ ...store.appearance, ...data }), previous = store.appearance;
     store.appearance = next;
@@ -110,6 +148,18 @@ function install(appState) {
     try { return await saveAppearance({ ...store.appearance, overlayOpacity: value }); }
     catch (error) { return { success: false, error: error.message }; }
   });
+  appState.studioMeetingCompatibility = store.meetingCompatibility !== false;
+  const { KeybindManager } = require(path.join(compiled, 'services/KeybindManager.js'));
+  const keybindManager = KeybindManager.getInstance();
+  const shouldRegisterKey = keybindManager.shouldRegister.bind(keybindManager);
+  keybindManager.shouldRegister = id => !appState.studioMeetingCompatibility && shouldRegisterKey(id);
+  const registerKeys = keybindManager.registerGlobalShortcuts.bind(keybindManager);
+  keybindManager.registerGlobalShortcuts = () => {
+    if (!appState.studioMeetingCompatibility) return registerKeys();
+    for (const accelerator of keybindManager.studioRegisteredAccelerators || []) globalShortcut.unregister(accelerator);
+    keybindManager.studioRegisteredAccelerators?.clear();
+  };
+  keybindManager.registerGlobalShortcuts();
   const floating = createFloating({ app, appState, globalShortcut, onChange: value => send({ kind: 'floating-state', value }) });
   handle('floating', async data => {
     if (['settings','prepare-session'].includes(data?.action)) {
@@ -179,7 +229,21 @@ function install(appState) {
     if (appState.getCurrentMeetingId()) throw new Error('请先结束采音，再更换采音设置。');
     store.audio = audioPreferences(data); write(); return { success: true };
   });
-  handle('start', async () => { await appState.startMeeting({ title: [store.preparation.company, store.preparation.role].filter(Boolean).join(' · ') || '面试练习' }); return { success: true }; });
+  handle('start', async options => {
+    if (options && typeof options.captureMicrophone !== 'boolean') throw new Error('请选择本次采音方式。');
+    await appState.startMeeting({ title: [store.preparation.company, store.preparation.role].filter(Boolean).join(' · ') || '面试练习', audio: options });
+    return { success: true };
+  });
+  handle('doubao-config', async data => {
+    if (appState.getCurrentMeetingId()) throw new Error('请先结束采音，再更换语音服务。');
+    if (typeof data?.apiKey !== 'string') throw new Error('请填写豆包语音 API Key。');
+    const apiKey = data.apiKey.trim() || cm.credentials?.doubaoApiKey || '';
+    if (!/^[\x21-\x7e]{8,512}$/.test(apiKey)) throw new Error('请从豆包语音产品页复制完整 API Key。');
+    cm.credentials = { ...cm.credentials, doubaoApiKey: apiKey, sttProvider: 'doubao' };
+    cm.saveCredentials();
+    await reconfigureSttProvider(appState);
+    return { success: true };
+  });
   handle('credentials-enable', () => {
     if (!cm.studioCredentialSession) throw new Error('凭证服务未就绪');
     const result = cm.studioCredentialSession.enableEncrypted();
@@ -207,11 +271,13 @@ function install(appState) {
     if (paths.length > 4 || paths.some(p => typeof p !== 'string' || !screenshots.has(p))) throw new Error('请选择本次 App 截取的图片');
     const preparedAt = performance.now();
     const mode = store.performance.mode;
-    const recent = appState.getIntelligenceManager().getFormattedContext(mode === 'fast' ? 60 : 180);
-    const quick = contextIndex.select(request.question, request.task === 'resume' ? 24000 : mode === 'fast' ? 6000 : 16000, store.preparation);
-    const deep = request.dual ? contextIndex.select(request.question, 24000, store.preparation) : quick;
+    const recent = ['written','ocr'].includes(request.task) ? '' : appState.getIntelligenceManager().getFormattedContext(mode === 'fast' ? 60 : 180);
+    const practice = ['written','ocr'].includes(request.task);
+    const quick = practice ? { text: '', sources: [], characters: 0, chunks: 0 } : contextIndex.select(request.question, request.task === 'resume' ? 24000 : mode === 'fast' ? 6000 : 16000, store.preparation);
+    const deep = request.dual && !practice ? contextIndex.select(request.question, 24000, store.preparation) : quick;
     const sources = { quick: quick.sources, deep: request.dual ? deep.sources : [] };
     const context = { quick: quick.text + preparationContext(store.preparation, mode === 'fast' ? 1500 : 6000) + '\n\n当前对话：\n' + recent.slice(-4500), deep: deep.text + preparationContext(store.preparation, 6000) + '\n\n当前对话：\n' + recent.slice(-10000) };
+    if (practice) { context.quick = '[STUDIO_CONTEXT]\n仅依据题目和附图分析。'; context.deep = context.quick; sources.quick = []; sources.deep = []; }
     metricRows.push({ requestId: request.id, event: 'context-ready', ms: Math.round(performance.now() - preparedAt), characters: quick.characters, chunks: quick.chunks, timestamp: Date.now() });
     const controller = new AbortController(); active.set(request.id, controller);
     const timeout = setTimeout(() => controller.abort(), 120000);
@@ -245,12 +311,46 @@ function install(appState) {
   }
   handle('ask', ask);
   handle('cancel', ({ id } = {}) => { if (typeof id !== 'string') throw new Error('请求标识无效'); active.get(id)?.abort(); return { success: true }; });
+  let regionCapture;
   handle('capture', async (data = {}) => {
     let imagePath;
-    try { imagePath = await (data.area === false ? appState.takeScreenshot() : appState.takeSelectiveScreenshot()); }
+    const capture = require(path.join(compiled, 'lib/screenshot-capture.js'));
+    regionCapture ||= require('./capture-regions.cjs').createRegionCapture({ appState, capture, screen });
+    try { imagePath = await regionCapture.run(data); }
     catch (error) { if (error.message === 'Selection cancelled') return { cancelled: true }; throw error; }
     screenshots.add(imagePath);
     return { success: true, path: imagePath, preview: await appState.getImagePreview(imagePath) };
+  });
+  let recognizing = false;
+  handle('image-recognize', async (data = {}) => {
+    if (recognizing) throw new Error('正在识别图片，请等待当前识别完成');
+    if (!Array.isArray(data.paths) || !data.paths.length || data.paths.length > 4 || data.paths.some(p => !screenshots.has(p))) throw new Error('请先附加题目图片');
+    recognizing = true;
+    try {
+      const results = [];
+      for (const filename of data.paths) results.push(await require('./local-ocr.cjs').recognizeImage(filename));
+      const text = results.map((r, i) => results.length > 1 ? `【图片 ${i + 1}】\n${r.text}` : r.text).join('\n\n');
+      if (text.length > 20000) throw new Error('识别文字超过20,000字符，请拆分题目图片');
+      return { success: true, text, engine: 'Windows OCR' };
+    } finally { recognizing = false; }
+  });
+  handle('image-import', async (data = {}) => {
+    const { storeImage } = require('./written-images.cjs');
+    let buffer;
+    if (data.source === 'clipboard') {
+      const image = clipboard.readImage();
+      if (image.isEmpty()) throw new Error('剪贴板没有图片，请先复制题目图片');
+      buffer = image.toPNG();
+    } else {
+      const choice = await dialog.showOpenDialog({ title: '选择题目图片', properties: ['openFile'],
+        filters: [{ name: '图片', extensions: ['png','jpg','jpeg','webp'] }] });
+      if (choice.canceled) return { cancelled: true };
+      const filename = choice.filePaths[0];
+      if (fs.statSync(filename).size > 15 * 1024 * 1024) throw new Error('图片须在 15 MB 以内');
+      buffer = fs.readFileSync(filename);
+    }
+    const image = await storeImage(buffer, path.join(app.getPath('userData'), 'written-images'), nativeImage);
+    screenshots.add(image.path); return { success: true, ...image };
   });
   handle('import', async (data = {}) => {
     const resume = data.kind === 'resume';
@@ -327,9 +427,14 @@ function install(appState) {
         throw new Error(speech.reason);
       }
       needsConfiguration = false;
+      const captureMicrophone = metadata?.audio?.captureMicrophone ?? store.audio.captureMicrophone;
+      const blocker = captureBlocker({ ...store.audio, captureMicrophone }, capturePermissions(systemPreferences));
+      if (blocker) throw new Error(blocker.message);
+      if (appState.getCurrentMeetingId()) throw new Error('采音会话已在进行，请使用暂停或继续转写');
+      transcription.reset();
       return startMeeting({ ...metadata, audio: { inputDeviceId: store.audio.inputDeviceId,
         outputDeviceId: process.platform === 'win32' ? store.audio.outputDeviceId : store.audio.backend === 'sck' ? 'sck' : store.audio.outputDeviceId,
-        captureMicrophone: store.audio.captureMicrophone } });
+        captureMicrophone } });
     };
   }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -351,6 +456,7 @@ function install(appState) {
     const original = contents.send.bind(contents);
     contents.send = (channel, ...args) => {
       if (['screenshot-attached','screenshot-taken'].includes(channel) && typeof args[0]?.path === 'string') screenshots.add(args[0].path);
+      if (channel === 'meeting-state-changed' && args[0]?.isActive === false) transcription.reset();
       if (channel === 'native-audio-transcript' && contents === appState.windowHelper.getLauncherWindow()?.webContents) {
         const segment = args[0];
         if (segment?.text && segment.final) {
@@ -365,6 +471,12 @@ function install(appState) {
         }
       }
       if (contents === appState.windowHelper.getLauncherWindow()?.webContents) {
+        if (channel === 'meeting-audio-recovered') send({ kind: 'speech-recovered' });
+        if (channel === 'meeting-audio-error' && typeof args[0] === 'string') {
+          for (const win of [appState.windowHelper.getLauncherWindow(), appState.windowHelper.getOverlayWindow?.()]) {
+            if (win && !win.isDestroyed()) win.webContents.send('studio:event', { kind: 'speech-error', message: args[0] });
+          }
+        }
         if (channel === 'session-reset') {
           for (const controller of active.values()) controller.abort();
           transcripts.clear(); lastGeneration = null; lastAutoAt = 0; send({ kind: 'reset' });
